@@ -11,3 +11,7 @@
   - `OutputDebugStringW`와의 호환성을 확보하여 디버그 로그 시스템 안정화.
 
 - **Takeaway:** 시스템 프로그래밍에서 문자열 인코딩 체계가 메모리 레이아웃 및 API 호환성에 미치는 영향 파악.
+
+- ![](C:\Users\user\AppData\Roaming\marktext\images\2026-01-03-03-53-24-image.png)
+
+Day 1 - Screen complete
