@@ -1,4 +1,22 @@
-### **Character Encoding Conflict (Unicode vs ANSI)**
+
+
+# DX12 High-Performance Renderer
+
+> **"A high-performance, low-level DirectX 12 renderer designed to maximize hardware utilization through explicit resource management and multi-threaded command recording via a custom Job System."**
+
+---
+
+## 🛠 Core Engineering Principles
+
+* **Explicit Hardware Control:** Bypassing driver abstraction for direct GPU memory and synchronization management.
+* **Modern Threading Model:** Parallelized command list generation to eliminate CPU-side bottlenecks.
+* **Static Analysis Driven:** Zero-warning build achieved through rigorous memory diagnostics and SAL annotations.
+
+
+
+
+
+#### **Issue: Character Encoding Conflict (Unicode vs ANSI)**
 
 - **Problem:** `OutputDebugString` 및 `sprintf_s` 호출 시 `char*`와 `LPCWSTR` 간의 형 변환 에러(`C2664`) 발생.
 
