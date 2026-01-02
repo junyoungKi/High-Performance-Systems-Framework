@@ -1,5 +1,3 @@
-
-
 # DX12 High-Performance Renderer
 
 > **"A high-performance, low-level DirectX 12 renderer designed to maximize hardware utilization through explicit resource management and multi-threaded command recording via a custom Job System."**
@@ -52,8 +50,6 @@
 
 - **Performance vs. Safety:** 해당 경고는 MS 엔지니어들이 의도한 성능 최적화 결과물이며, `switch` 문을 통해 논리적으로 안전하게 보호되고 있음을 확인 후 오탐(False Positive)으로 간주함.
 
-
-
 ### **Issue: Static Analysis Warning C6387 (LoadIconW)**
 
 - **Problem:** `LoadIconW` 호출 시 두 번째 인자(`lpIconName`)가 `0(NULL)`일 수 있다는 정적 분석 경고 발생.
@@ -66,25 +62,9 @@
 
 - **Engineering Insight:** "작동하는 코드"와 "올바른 코드"의 차이를 인지함. 로우레벨 프로그래밍에서는 운영체제의 예외 처리에 의존하기보다, 모든 자원 핸들을 명시적이고 예측 가능한 상태로 제어해야 함을 학습함.
 
-
-
 ### **Day - 1 Summury : Screen complete**
 
-<img src="file:///C:/Users/user/AppData/Roaming/marktext/images/2026-01-03-04-15-30-image.png" title="" alt="" width="671">
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+![Rendering Result](./images/2026-01-03-screen_complete.png)
 
 
 
