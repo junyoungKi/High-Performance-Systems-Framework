@@ -1,32 +1,50 @@
-# Prerequisites
-*.d
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Bb]uild/
+out/
+out/coverage/*
+cmake-build-*/
+install/
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# imgui gen files
+imgui.ini
 
-# Precompiled Headers
-*.gch
-*.pch
+# User spesific settings
+CMakeUserPresets.json
 
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
+# IDE files
+.vs/
+.idea/
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.bak
+*.swp
+*~
+_ReSharper*
+*.log
 
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
+# OS Generated Files
+.DS_Store
+.DS_STORE
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.Trash-*
+$RECYCLE.BIN/
+.TemporaryItems
+ehthumbs.db
+Thumbs.db
