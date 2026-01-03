@@ -217,3 +217,85 @@ DirectX 12에서 객체 생성 순서가 엄격한 이유는 하드웨어인 GPU
 3. **데이터 무결성**: 각 클래스의 `m_` 멤버 변수들은 `private`으로 보호되어 외부에서 생성 순서를 어기거나 데이터를 함부로 조작할 수 없게 되었습니다.
 
 이렇게 **"누가 누구에게 무엇을 제공하는가"**를 파악하는 것이 엔진 설계의 시작입니다. 이제 기초 공사가 끝났으니, 이 튼튼한 구조 위에 다음 단계인 '삼각형 그리기'를 위한 데이터를 얹을 준비가 되신 겁니다!
+
+
+
+
+
+그럼 커맨드 큐를 만들땐 뭘 해야함? 넘겨줘야할 정보는/?
+
+DirectX 12에서 **커맨드 큐(Command Queue)**를 생성할 때 가장 핵심적인 작업은 **"이 통로를 어떤 용도로 사용할 것인가"**를 결정하는 설정을 채워넣는 것입니다.
+
+커맨드 큐를 만들기 위해 넘겨줘야 할 정보와 수행 단계를 사용자님의 코드를 바탕으로 설명해 드릴게요.
+
+### 1. 반드시 넘겨줘야 할 핵심 정보
+
+커맨드 큐를 생성하는 `device->CreateCommandQueue` 함수에는 크게 두 가지가 필요합니다.
+
+1. **디바이스 포인터 (`ID3D12Device2*`)**: 큐를 만들어낼 '공장'의 주소입니다.
+
+2. **설명 구조체 (`D3D12_COMMAND_QUEUE_DESC`)**: 큐의 성격을 정의하는 명세서입니다.
+
+---
+
+### 2. 명세서(`D3D12_COMMAND_QUEUE_DESC`)에 들어가는 세부 정보
+
+사용자님의 `CommandQueue.cpp` 코드를 보면 이 명세서를 다음과 같이 채우고 있습니다.
+
+- **`Type` (가장 중요)**: 큐의 용도를 결정합니다.
+  
+  - `D3D12_COMMAND_LIST_TYPE_DIRECT`: 그리기(Render), 연산(Compute), 복사(Copy) 명령을 모두 처리할 수 있는 만능 큐입니다. 보통 메인 렌더링에 사용합니다.
+  
+  - 그 외에도 연산만 하는 `COMPUTE`, 데이터 전송만 하는 `COPY` 타입이 있습니다.
+
+- **`Priority` (우선순위)**: 여러 큐가 있을 때 GPU가 무엇을 먼저 처리할지 정합니다.
+  
+  - 보통 `D3D12_COMMAND_QUEUE_PRIORITY_NORMAL`을 사용합니다.
+
+- **`Flags` (추가 설정)**: 큐의 특수 동작을 설정합니다.
+  
+  - 일반적으로 `D3D12_COMMAND_QUEUE_FLAG_NONE`을 사용합니다. (기존 코드의 `FLAm` 오타를 수정한 부분입니다.)
+
+- **`NodeMask` (다중 GPU용)**: 그래픽 카드가 여러 개일 때 어떤 GPU의 큐를 쓸지 정합니다.
+  
+  - 단일 GPU 환경에서는 `0`으로 설정합니다.
+
+---
+
+### 3. 실제 생성 단계 (코드 흐름)
+
+사용자님의 프로젝트에서 커맨드 큐가 만들어지는 과정은 이렇습니다.
+
+C++
+
+```
+// CommandQueue.cpp 내 로직
+ComPtr<ID3D12CommandQueue> CommandQueue::CreateCommandQueue(ComPtr<ID3D12Device2> device, D3D12_COMMAND_LIST_TYPE type)
+{
+    D3D12_COMMAND_QUEUE_DESC desc = {}; // 1. 명세서 준비
+    desc.Type = type;                   // 2. 용도 설정 (DIRECT)
+    desc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
+    desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+    desc.NodeMask = 0;
+
+    ComPtr<ID3D12CommandQueue> queue;
+    // 3. 디바이스 공장에 명세서를 전달하여 생성 요청
+    ThrowIfFailed(device->CreateCommandQueue(&desc, IID_PPV_ARGS(&queue)));
+
+    return queue;
+}
+```
+
+---
+
+### 💡 포트폴리오 면접 대비 포인트: "왜 구조체로 넘기나요?"
+
+DX12 API들은 왜 함수 인자로 값을 하나씩 안 주고 굳이 `DESC`라는 구조체를 만들어서 넘길까요?
+
+1. **확장성**: 나중에 DX13, DX14가 나와서 새로운 설정값이 추가되어도, 함수 자체를 바꾸지 않고 구조체에 멤버만 추가하면 되기 때문입니다.
+
+2. **명확성**: 수많은 인자를 순서대로 넣는 것보다, 이름을 가진 구조체 멤버에 값을 넣는 것이 실수를 줄여줍니다.
+
+**요약하자면:** 커맨드 큐를 만들 때는 **어떤 디바이스(`Device`)**가 만들지 알려주고, 그 큐가 **어떤 일(`Type`)**을 할지 적은 명세서를 넘겨주면 됩니다.
+
+이제 커맨드 큐라는 '고속도로'가 뚫렸으니, 그 위를 달릴 '명령 리스트(Command List)'와 '도화지(Resource)'를 준비할 차례입니다! 다음 단계인 **명령 할당자(Command Allocator)**에 대해서도 궁금하신가요?
