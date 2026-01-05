@@ -104,6 +104,8 @@ application 클래스 내부 함수들 다른 헤더로 분리시키기
 
 에러 잡아주는 함수 커스텀하기(커스텀 Logger class)
 
+메모리풀 구현
+
 Memory Tracking: `AlignedAllocator`에 현재 할당량을 기록하는 기능을 넣고 ImGui로 보여주기. (구현 난이도: 하 / 가시성: 상)
 
 Stack Allocator: Job System용으로 하나 만들어서 "프레임 단위 임시 메모리 최적화"를 했다고 한 줄 적기. (구현 난이도: 중 / 전문성 어필: 상)
