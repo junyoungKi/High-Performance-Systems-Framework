@@ -1,8 +1,9 @@
 #include "pch.h"
 #include "RenderDevice.h"
 
-bool RenderDevice::Initialize(HWND hWnd, ID3D12CommandQueue* commandQueue, uint32_t width, uint32_t height) {
-    m_Device = CreateDevice(GetAdapter(false));
+bool RenderDevice::Initialize(HWND hWnd, ComPtr<ID3D12Device2> device, ID3D12CommandQueue* commandQueue, uint32_t width, uint32_t height) {
+    m_Device = device;
+    m_TearingSupported = CheckTearingSupport();
     m_SwapChain = CreateSwapChain(hWnd, commandQueue, width, height, m_NumFrames);
     m_RTVDescriptorHeap = CreateDescriptorHeap(m_Device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, m_NumFrames);
     m_RTVDescriptorSize = m_Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -20,18 +21,17 @@ void RenderDevice::EnableDebugLayer() {
 }
 
 ComPtr<IDXGIAdapter4> RenderDevice::GetAdapter(bool useWarp) {
-    ComPtr<IDXGIFactory4> factory;
-    ThrowIfFailed(CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&factory)));
+    ThrowIfFailed(CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&m_factory)));
     ComPtr<IDXGIAdapter1> adapter1;
     ComPtr<IDXGIAdapter4> adapter4;
 
     if (useWarp) {
-        ThrowIfFailed(factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter1)));
+        ThrowIfFailed(m_factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter1)));
         ThrowIfFailed(adapter1.As(&adapter4));
     }
     else {
         SIZE_T maxMem = 0;
-        for (UINT i = 0; factory->EnumAdapters1(i, &adapter1) != DXGI_ERROR_NOT_FOUND; ++i) {
+        for (UINT i = 0; m_factory->EnumAdapters1(i, &adapter1) != DXGI_ERROR_NOT_FOUND; ++i) {
             DXGI_ADAPTER_DESC1 desc;
             adapter1->GetDesc1(&desc);
             if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0 &&
@@ -64,8 +64,7 @@ bool RenderDevice::CheckTearingSupport() {
 }
 
 ComPtr<IDXGISwapChain4> RenderDevice::CreateSwapChain(HWND hWnd, ComPtr<ID3D12CommandQueue> queue, uint32_t w, uint32_t h, uint32_t count) {
-    ComPtr<IDXGIFactory4> factory;
-    ThrowIfFailed(CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&factory)));
+    ThrowIfFailed(CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&m_factory)));
 
     DXGI_SWAP_CHAIN_DESC1 desc = {};
     desc.Width = w; desc.Height = h; desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -75,7 +74,7 @@ ComPtr<IDXGISwapChain4> RenderDevice::CreateSwapChain(HWND hWnd, ComPtr<ID3D12Co
     desc.Flags = CheckTearingSupport() ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 
     ComPtr<IDXGISwapChain1> swapChain1;
-    ThrowIfFailed(factory->CreateSwapChainForHwnd(queue.Get(), hWnd, &desc, nullptr, nullptr, &swapChain1));
+    ThrowIfFailed(m_factory->CreateSwapChainForHwnd(queue.Get(), hWnd, &desc, nullptr, nullptr, &swapChain1));
     ComPtr<IDXGISwapChain4> swapChain4;
     ThrowIfFailed(swapChain1.As(&swapChain4));
     return swapChain4;
@@ -115,4 +114,16 @@ ID3D12Resource* RenderDevice::GetBackBuffer(UINT index) { return m_BackBuffers[i
 CD3DX12_CPU_DESCRIPTOR_HANDLE RenderDevice::GetRTVHandle(UINT index) {
     return CD3DX12_CPU_DESCRIPTOR_HANDLE(m_RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), index, m_RTVDescriptorSize);
 }
-void RenderDevice::Present() { ThrowIfFailed(m_SwapChain->Present(1, 0)); m_CurrentBackBufferIndex = m_SwapChain->GetCurrentBackBufferIndex(); }
+void RenderDevice::Present() 
+{ 
+    UINT syncInterval = m_VSync ? 1 : 0;
+    UINT presentFlags = 0;
+
+    // Tearing 지원 여부도 보통 RenderDevice가 초기화 시점에 체크해서 들고 있습니다.
+    if (!m_VSync && m_TearingSupported) {
+        presentFlags = DXGI_PRESENT_ALLOW_TEARING;
+    }
+
+    ThrowIfFailed(m_SwapChain->Present(syncInterval, presentFlags));
+    m_CurrentBackBufferIndex = m_SwapChain->GetCurrentBackBufferIndex();
+}

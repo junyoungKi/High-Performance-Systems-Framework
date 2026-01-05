@@ -13,7 +13,5 @@ private:
     uint32_t m_ClientHeight = 720;
     HWND m_hWnd = nullptr;
     RECT m_WindowRect = {};
-    bool m_VSync = true;
-    bool m_TearingSupported = false;
     bool m_Fullscreen = false;
 };

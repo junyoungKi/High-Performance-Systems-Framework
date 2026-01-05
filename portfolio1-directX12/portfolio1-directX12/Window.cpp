@@ -13,12 +13,24 @@ HWND Window::Create(HINSTANCE hInst, const wchar_t* className, const wchar_t* ti
 }
 
 LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+    if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam)) return true;
+
     Application* app = reinterpret_cast<Application*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
     if (app) {
         switch (msg) {
-        case WM_PAINT: app->Update(); app->Render(); return 0;
-        case WM_SIZE: app->OnResize(LOWORD(lParam), HIWORD(lParam)); return 0;
-        case WM_DESTROY: PostQuitMessage(0); return 0;
+        case WM_PAINT: 
+            app->Update(); 
+            app->Render(); 
+            return 0;
+
+        case WM_SIZE:
+            app->OnResize(LOWORD(lParam), HIWORD(lParam)); 
+            return 0;
+
+        case WM_DESTROY: 
+            PostQuitMessage(0);
+            return 0;
         }
     }
     return DefWindowProcW(hwnd, msg, wParam, lParam);

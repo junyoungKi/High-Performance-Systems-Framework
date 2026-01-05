@@ -37,7 +37,26 @@ ComPtr<ID3D12Fence> CommandQueue::CreateFence(ComPtr<ID3D12Device2> device) {
     return fence;
 }
 
-void CommandQueue::Execute(ID3D12GraphicsCommandList* list) { ID3D12CommandList* pp[] = { list }; m_CommandQueue->ExecuteCommandLists(1, pp); }
-uint64_t CommandQueue::Signal() { uint64_t v = ++m_FenceValue; ThrowIfFailed(m_CommandQueue->Signal(m_Fence.Get(), v)); return v; }
-void CommandQueue::WaitForFenceValue(uint64_t v) { if (m_Fence->GetCompletedValue() < v) { ThrowIfFailed(m_Fence->SetEventOnCompletion(v, m_FenceEvent)); ::WaitForSingleObject(m_FenceEvent, INFINITE); } }
+void CommandQueue::Execute(ID3D12GraphicsCommandList* list) 
+{ 
+    ID3D12CommandList* pp[] = { list }; 
+    m_CommandQueue->ExecuteCommandLists(1, pp); 
+}
+
+uint64_t CommandQueue::Signal() 
+{ 
+    uint64_t v = ++m_FenceValue; 
+    ThrowIfFailed(m_CommandQueue->Signal(m_Fence.Get(), v)); 
+    return v; 
+}
+
+void CommandQueue::WaitForFenceValue(uint64_t v) 
+{ 
+    if (m_Fence->GetCompletedValue() < v) { 
+        ThrowIfFailed(m_Fence->SetEventOnCompletion(v, m_FenceEvent));
+        ::WaitForSingleObject(m_FenceEvent, INFINITE); 
+    } 
+}
+
 void CommandQueue::Flush() { WaitForFenceValue(Signal()); }
+
