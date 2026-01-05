@@ -1290,6 +1290,121 @@ SIMD의 핵심은 "모든 레인이 동일한 명령을 수행한다"는 것입�
 
 
 
+## 1️⃣ 로컬 큐 vs 글로벌 큐 예제 (간단화)
+
+### 글로벌 큐 버전
+
+
+
+    #include <thread>
+    #include <queue>
+    #include <mutex>
+    #include <vector>
+    #include <iostream>
+    
+    std::queue<int> taskQueue;
+    std::mutex queueMutex;
+    
+    void worker() {
+     while (true) {
+     int task = -1;
+     {
+     std::lock_guard<std::mutex> lock(queueMutex);
+     if (!taskQueue.empty()) {
+     task = taskQueue.front();
+     taskQueue.pop();
+     }
+     }
+     if (task == -1) break; // 작업 없으면 종료
+     // 작업 처리
+     std::cout << "Processing " << task << "\n";
+     }
+    }
+    
+    int main() {
+     // 작업 추가
+     for (int i = 0; i < 10; i++) taskQueue.push(i);
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 4; i++)
+        threads.emplace_back(worker);
+    
+    for (auto& t : threads) t.join();
+
+}
+
+- **특징**: 모든 스레드가 하나의 큐에 접근 → `mutex` 경쟁 발생
+
+---
+
+### 로컬 큐 + Work Stealing 버전 (간단화)
+
+
+
+    #include <thread>
+    #include <deque>
+    #include <vector>
+    #include <iostream>
+    #include <atomic>
+    #include <mutex>
+    
+    struct ThreadData {
+     std::deque<int> localQueue;
+     std::mutex mtx;
+    };
+    
+    std::vector<ThreadData> threadsData;
+    
+    void worker(int id, int numThreads) {
+     while (true) {
+     int task = -1;
+       
+          // 1. 로컬 큐에서 작업 가져오기
+        {
+            std::lock_guard<std::mutex> lock(threadsData[id].mtx);
+            if (!threadsData[id].localQueue.empty()) {
+                task = threadsData[id].localQueue.front();
+                threadsData[id].localQueue.pop_front();
+            }
+        }
+    
+        // 2. 로컬 큐 없으면 다른 스레드에서 steal
+        if (task == -1) {
+            for (int i = 0; i < numThreads; i++) {
+                if (i == id) continue;
+                std::lock_guard<std::mutex> lock(threadsData[i].mtx);
+                if (!threadsData[i].localQueue.empty()) {
+                    task = threadsData[i].localQueue.back(); // 뒤에서 steal
+                    threadsData[i].localQueue.pop_back();
+                    break;
+                }
+            }
+        }
+    
+        if (task == -1) break; // 작업 없으면 종료
+    
+        // 작업 처리
+        std::cout << "Thread " << id << " processing " << task << "\n";
+        }
+    }
+    
+    int main() {
+         int numThreads = 4;
+         threadsData.resize(numThreads);
+        // 작업 분배
+        for (int i = 0; i < 10; i++)
+            threadsData[i % numThreads].localQueue.push_back(i);
+    
+        std::vector<std::thread> threads;
+        for (int i = 0; i < numThreads; i++)
+            threads.emplace_back(worker, i, numThreads);
+    
+        for (auto& t : threads) t.join();
+    }
+
+- **특징**: 대부분 작업은 로컬 큐에서 처리 → 경쟁 최소화, 부하 불균형 발생 시 Stealing
+
+
+
 Fence 동기화?
 
 스핀락? 
