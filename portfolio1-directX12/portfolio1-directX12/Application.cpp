@@ -54,6 +54,7 @@ Application::~Application() {
     for (auto& thread : m_threadPool) thread.join();
 }
 
+// Work Stealing 구현 추가
 void Application::WorkerThreadLoop(uint32_t threadIndex) {
     /*while (true) {
         std::function<void()> task;
@@ -111,14 +112,6 @@ void Application::WaitForJobs(std::atomic<int>& counter) {
     }
 }
 
-void Application::EnqueueTask(std::function<void()> task) {
-    {
-        std::unique_lock<std::mutex> lock(m_queueMutex);
-        m_tasks.push(std::move(task));
-    }
-    m_condition.notify_one();
-}
-
 void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt) {
     // --- SIMD (SSE) 시작 ---
     // --- AVX-256 ---
@@ -173,57 +166,64 @@ void Application::Run() {
 }
 
 void Application::Update() {
-
-    // ImGui 새 프레임 시작
+    // 1. ImGui 프레임 시작 및 UI 렌더링 (성능 지표 표시)
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    // ImGui 슬라이더
     ImGui::Begin("Simulation Settings");
     ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
-    ImGui::SliderInt("Instance Count", &m_uiInstanceCount, 1, 10000000);
-    // 1. 현재 RenderDevice의 VSync 상태를 가져옵니다.
-    bool vsync = m_renderDevice.IsVSyncEnabled();
 
-    // 2. 체크박스를 그립니다. 
-    // 클릭이 발생하여 값이 바뀌면 if문 내부가 실행됩니다.
+    // 이전 프레임에서 측정된 수치 표시
+    ImGui::Text("Physics Logic (CPU+SIMD): %.4f ms", m_physicsLogicTimeMS);
+    ImGui::Text("GPU Data Copy (memcpy): %.4f ms", m_gpuCopyTimeMS);
+
+    // 병목 판단 가이드 (체크포인트)
+    if (m_physicsLogicTimeMS + m_gpuCopyTimeMS < 1.0f) {
+        ImGui::TextColored(ImVec4(0, 1, 0, 1), "Status: CPU-Side is Optimized (GPU Bound?)");
+    }
+    else {
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), "Status: CPU/Bus Load detected");
+    }
+
+    ImGui::SliderInt("Instance Count", &m_uiInstanceCount, 1, 10000000);
+
+    bool vsync = m_renderDevice.IsVSyncEnabled();
     if (ImGui::Checkbox("Enable VSync", &vsync)) {
-        // 3. 바뀐 값을 다시 RenderDevice에 적용합니다.
         m_renderDevice.SetVSync(vsync);
     }
     ImGui::End();
 
-    // 현재 UI 값에 맞춰 실제 동작할 개수 동적 계산
-    m_instanceCount = static_cast<uint32_t>(m_uiInstanceCount);
-    m_instancesPerThread = m_instanceCount / NUM_THREADS;
-
+    // 2. 시간 관리 및 델타 타임 계산
     static uint64_t frameCounter = 0;
     static double elapsedSeconds = 0.0;
-    static std::chrono::high_resolution_clock clock;
-    static auto t0 = clock.now();
+    static auto t0 = std::chrono::high_resolution_clock::now();
 
-    frameCounter++;
-    auto t1 = clock.now();
-    auto deltaTime = t1 - t0;
+    auto t1 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<float> deltaTime = t1 - t0;
     t0 = t1;
-    elapsedSeconds += deltaTime.count() * 1e-9;
+    float dt = deltaTime.count();
 
+    // 초당 FPS 로그 출력
+    frameCounter++;
+    elapsedSeconds += (double)dt;
     if (elapsedSeconds > 1.0) {
         wchar_t buffer[500];
-        auto fps = frameCounter / elapsedSeconds;
+        auto fps = (double)frameCounter / elapsedSeconds;
         swprintf_s(buffer, 500, L"FPS: %f\n", fps);
         OutputDebugString(buffer);
         frameCounter = 0;
         elapsedSeconds = 0.0;
     }
 
-    //물리 시뮬레이션 (SOA 방식의 순회)
-    // 위치값만 연속적으로 순회하므로 캐시 효율이 매우 높습니다.
-    float dt = std::chrono::duration<float>(deltaTime).count();
+    // 3. 물리 시뮬레이션 및 시간 측정 (순수 CPU+SIMD 연산 구간)
+    m_instanceCount = static_cast<uint32_t>(m_uiInstanceCount);
+    m_instancesPerThread = (NUM_THREADS > 0) ? m_instanceCount / NUM_THREADS : m_instanceCount;
+
+    // --- 물리 연산 시간 측정 시작 ---
+    auto physicsStart = std::chrono::high_resolution_clock::now();
 
     const uint32_t MIN_INSTANCES_FOR_THREADS = 1000;
-
     if (m_instanceCount < MIN_INSTANCES_FOR_THREADS) {
         // 메인 스레드에서 즉시 처리
         for (uint32_t i = 0; i < m_instanceCount; ++i) {
@@ -232,7 +232,7 @@ void Application::Update() {
         }
     }
     else {
-        // 1. 남은 작업 개수를 추적할 원자적 카운터
+        // 잡 시스템을 이용한 병렬 처리
         std::atomic<int> jobsCounter(0);
         uint32_t totalJobs = NUM_THREADS;
         jobsCounter.store(totalJobs);
@@ -243,34 +243,37 @@ void Application::Update() {
 
             Job physicsJob;
             physicsJob.task = [this, start, end, dt]() {
-                this->ExecutePhysicsSIMD(start, end, dt); 
-            };
+                this->ExecutePhysicsSIMD(start, end, dt);
+                };
             physicsJob.counter = &jobsCounter;
 
-            // 큐에 넣는 행위는 람다 외부(메인 스레드)에서 수행
             m_localQueues[t % NUM_THREADS]->Push(std::move(physicsJob));
         }
-
-        // 메인 스레드도 대기하지 않고 일을 도움
+        // 메인 스레드도 참여하며 모든 잡이 끝날 때까지 대기
         WaitForJobs(jobsCounter);
     }
 
-    /* erase for ring buffer and reducing overhead.
-    void* pData = nullptr;
-    m_instancePosYBuffer->Map(0, nullptr, &pData);
-    memcpy(pData, m_instancePosY.data(), m_instanceCount * sizeof(float));
-    m_instancePosYBuffer->Unmap(0, nullptr);*/ 
-    
+    auto physicsEnd = std::chrono::high_resolution_clock::now();
+    m_physicsLogicTimeMS = std::chrono::duration<float, std::milli>(physicsEnd - physicsStart).count();
+    // --- 물리 연산 시간 측정 종료 ---
+
+    // 4. GPU 데이터 복사 및 시간 측정 (PCI-e 대역폭 사용 구간)
+    // --- GPU 데이터 복사 시간 측정 시작 ---
+    auto copyStart = std::chrono::high_resolution_clock::now();
+
     // 1. 현재 프레임 인덱스 가져오기 (0, 1, 2 중 하나)
     UINT frameIndex = m_renderDevice.GetCurrentBackBufferIndex();
 
-    // 2. 현재 프레임 영역의 시작 주소 계산
+    // 2. 현재 프레임 영역의 시작 주소 계산 (Ring Buffer)
     UINT oneFrameOffset = m_maxInstanceCount * sizeof(float);
     uint8_t* pDest = static_cast<uint8_t*>(m_posYMappedPtr) + (frameIndex * oneFrameOffset);
 
-    // 3. 데이터 복사 (Map/Unmap 없이 바로 복사)
+    // 3. 데이터 복사 (Persistent Mapping된 공간에 memcpy)
     memcpy(pDest, m_instancePosY.data(), m_instanceCount * sizeof(float));
 
+    auto copyEnd = std::chrono::high_resolution_clock::now();
+    m_gpuCopyTimeMS = std::chrono::duration<float, std::milli>(copyEnd - copyStart).count();
+    // --- GPU 데이터 복사 시간 측정 종료 ---
 }
 
 void Application::Render() {
@@ -307,20 +310,21 @@ void Application::Render() {
     m_instancePosYView.StrideInBytes = sizeof(float);
     m_instancePosYView.SizeInBytes = m_instanceCount * sizeof(float);
 
-    std::vector<std::shared_ptr<std::promise<ID3D12CommandList*>>> promises;
+    // [수정] 원자적 카운터를 사용하여 모든 워커의 종료를 기다림
+    std::atomic<int> renderCounter(0);
+    std::vector<ID3D12CommandList*> workerLists(NUM_THREADS, nullptr);
+
     for (uint32_t t = 0; t < NUM_THREADS; ++t) {
-        // 각 스레드가 그릴 범위를 정확히 계산 (나머지 포함)
         uint32_t start = t * m_instancesPerThread;
         uint32_t end = (t == NUM_THREADS - 1) ? m_instanceCount : (t + 1) * m_instancesPerThread;
         uint32_t countToDraw = (end > start) ? (end - start) : 0;
 
-        // 그릴 게 없는 스레드는 태스크를 생성하지 않음
         if (countToDraw == 0) continue;
 
-        auto promise = std::make_shared<std::promise<ID3D12CommandList*>>();
-        promises.push_back(promise);
+        renderCounter.fetch_add(1);
 
-        EnqueueTask([this, t, frameIndex, rtv, vp, sc, promise, start, countToDraw]() {
+        Job renderJob;
+        renderJob.task = [this, t, frameIndex, rtv, vp, sc, start, countToDraw, &workerLists]() {
             auto& worker = m_workers[t];
             auto alloc = worker.commandAllocators[frameIndex].Get();
             auto list = worker.commandList.Get();
@@ -328,7 +332,6 @@ void Application::Render() {
             alloc->Reset();
             list->Reset(alloc, m_pipelineState.Get());
 
-            //블랙 스크린 방지: 워커마다 필수 상태 재설정
             list->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
             list->RSSetViewports(1, &vp);
             list->RSSetScissorRects(1, &sc);
@@ -340,14 +343,23 @@ void Application::Render() {
 
             list->DrawInstanced(3, countToDraw, 0, start);
             list->Close();
-            promise->set_value(list);
-            });
+
+            workerLists[t] = list; // 결과 저장
+            };
+        renderJob.counter = &renderCounter;
+
+        m_localQueues[t % NUM_THREADS]->Push(std::move(renderJob));
     }
+
+    // 메인 스레드도 대기하면서 일을 도움 (이게 하얀 화면을 해결하는 핵심)
+    WaitForJobs(renderCounter);
 
     // 3. [Main] 수집 및 후처리
     std::vector<ID3D12CommandList*> submitLists;
     submitLists.push_back(preList); // Clear 먼저
-    for (auto& p : promises) submitLists.push_back(p->get_future().get()); // 워커 결과 대기
+    for (auto list : workerLists) {
+        if (list) submitLists.push_back(list);
+    }
 
     // 후처리 리스트: Barrier (RT -> Present)
     auto postList = m_mainPost.commandList.Get();

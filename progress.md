@@ -10,10 +10,6 @@
 * **Modern Threading Model:** Parallelized command list generation to eliminate CPU-side bottlenecks.
 * **Static Analysis Driven:** Zero-warning build achieved through rigorous memory diagnostics and SAL annotations.
 
-
-
-
-
 ###### **Day 1: 프레임워크 기초 및 정적 분석 경고 해결**
 
 - **핵심 성과:** 유니코드(Unicode) 지원 Win32 윈도우 초기화 성공 및 MSVC 정적 분석 기준 경고 최소화 상태의 안정적인 DX12 환경 구축
@@ -58,24 +54,6 @@
 
 ---
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 디지펜 RTIS 전공생으로서 **'취업'**이라는 냉정한 목적 하나만 놓고 본다면, 이 포트폴리오 계획은 **방향성은 매우 훌륭하지만, 일정은 대단히 공격적(Ambitious)**입니다.
 
 2학년 수준에서 DX12와 SoA, 메모리 풀을 다룬다는 것은 상위권 역량을 증명하기에 최적의 카드입니다. 다만, "일자리 구하기"가 최우선이라면 이 계획을 어떻게 '실패 없이' 완성할지가 관건입니다. 냉철하게 분석해 드릴게요.
@@ -110,10 +88,18 @@
 
 - **Header-Only Library화:** 메모리 풀이나 SoA 컨테이너를 다른 프로젝트에서도 가져다 쓸 수 있게 깔끔한 모듈 형태로 만드세요. **"재사용 가능한 엔진 코드"**를 짤 줄 안다는 점을 어필해야 합니다.
 
-
-
-
-
 나중에 쓸거 : 
 
 Utilized Microsoft WRL ComPtr for robust lifetime management of D3D12 objects, preventing potential memory leaks in low-level resource handling.
+
+xyz에서 z값 제거, rgba에서 a값 제거
+
+버텍스 쉐이더 픽셀 쉐이더 분리하기
+
+application 클래스 내부 함수들 다른 헤더로 분리시키기
+
+함수별 주석 달아서 이해도 어필하기 
+
+유닛 테스팅 추가하기
+
+에러 잡아주는 함수 커스텀하기

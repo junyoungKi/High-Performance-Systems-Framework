@@ -93,7 +93,6 @@ private:
 
     void WorkerThreadLoop(uint32_t threadIndex);
     void WaitForJobs(std::atomic<int>& counter);
-    void EnqueueTask(std::function<void()> task);
 
     void ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt);
 
@@ -158,4 +157,7 @@ private:
     // ImGui용 SRV Descriptor Heap (DX12 필수)
     ComPtr<ID3D12DescriptorHeap> m_imguiSrvHeap;
     int m_uiInstanceCount = 10;
+
+    float m_physicsLogicTimeMS = 0.0f; // 물리 연산 소요 시간 (ms)
+    float m_gpuCopyTimeMS = 0.0f;      // GPU 데이터 복사 소요 시간 (ms)
 };
