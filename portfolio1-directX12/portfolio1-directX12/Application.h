@@ -61,7 +61,6 @@ public:
 
     bool InitImGui();
 
-
     // 새로운 삼각형 생성 (Allocate 역할)    !!!!!!나중에 구현부로 옮길 것!!!!!!
     uint32_t CreateTriangle() {
         if (m_freeIndices.empty()) {
@@ -139,10 +138,17 @@ private:
     D3D12_VERTEX_BUFFER_VIEW m_instancePosYView;
     std::vector<uint32_t> m_freeIndices; // 사용 가능한 빈 칸 목록
 
-    static const uint32_t NUM_THREADS = 20; // 사용할 스레드 개수
+    // 링 버퍼용 포인터 (Persistent Mapping)
+    void* m_posYMappedPtr = nullptr;
+    // 상수 정의 (보통 3프레임 버퍼링 사용)
+    const UINT FRAME_COUNT = 3;
+
+    uint32_t NUM_THREADS; // 사용할 스레드 개수
     ThreadWorker m_mainPre;
     ThreadWorker m_mainPost;
-    ThreadWorker m_workers[NUM_THREADS];
+    // 고정 배열 대신 vector를 사용합니다.
+    std::vector<ThreadWorker> m_workers;
+
     uint32_t m_instancesPerThread;
 
     // ImGui용 SRV Descriptor Heap (DX12 필수)

@@ -5,6 +5,12 @@ bool Application::Initialize(HINSTANCE hInstance, int width, int height) {
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     m_renderDevice.EnableDebugLayer();
 
+    // 1. 스레드 개수 결정 (0이 반환될 수 있으므로 최소값 1 보장)
+    uint32_t cores = std::thread::hardware_concurrency();
+    NUM_THREADS = (cores > 1) ? cores - 1 : 1;
+    // 2. 워커 자원 배열(vector) 크기 설정
+    m_workers.resize(NUM_THREADS);
+
     if (!m_window.Create(hInstance, L"DX12WindowClass", L"DX12 Engine Renderer", width, height, this))
         return false;
 
@@ -191,10 +197,21 @@ void Application::Update() {
         while (remainingTasks > 0) { std::this_thread::yield(); }
     }
 
+    /* erase for ring buffer and reducing overhead.
     void* pData = nullptr;
     m_instancePosYBuffer->Map(0, nullptr, &pData);
     memcpy(pData, m_instancePosY.data(), m_instanceCount * sizeof(float));
-    m_instancePosYBuffer->Unmap(0, nullptr);
+    m_instancePosYBuffer->Unmap(0, nullptr);*/ 
+    
+    // 1. 현재 프레임 인덱스 가져오기 (0, 1, 2 중 하나)
+    UINT frameIndex = m_renderDevice.GetCurrentBackBufferIndex();
+
+    // 2. 현재 프레임 영역의 시작 주소 계산
+    UINT oneFrameOffset = m_maxInstanceCount * sizeof(float);
+    uint8_t* pDest = static_cast<uint8_t*>(m_posYMappedPtr) + (frameIndex * oneFrameOffset);
+
+    // 3. 데이터 복사 (Map/Unmap 없이 바로 복사)
+    memcpy(pDest, m_instancePosY.data(), m_instanceCount * sizeof(float));
 
 }
 
@@ -222,6 +239,15 @@ void Application::Render() {
     RECT rect; GetClientRect(m_window.GetHWND(), &rect);
     CD3DX12_VIEWPORT vp(0.0f, 0.0f, (float)rect.right, (float)rect.bottom);
     CD3DX12_RECT sc(0, 0, rect.right, rect.bottom);
+
+    // [핵심] GPU가 읽을 버퍼 위치를 현재 프레임 영역으로 오프셋 조정
+    UINT oneFrameOffset = m_maxInstanceCount * sizeof(float);
+    D3D12_GPU_VIRTUAL_ADDRESS currentGPUAddress = m_instancePosYBuffer->GetGPUVirtualAddress() + (frameIndex * oneFrameOffset);
+
+    // 뷰 업데이트
+    m_instancePosYView.BufferLocation = currentGPUAddress;
+    m_instancePosYView.StrideInBytes = sizeof(float);
+    m_instancePosYView.SizeInBytes = m_instanceCount * sizeof(float);
 
     std::vector<std::shared_ptr<std::promise<ID3D12CommandList*>>> promises;
     for (uint32_t t = 0; t < NUM_THREADS; ++t) {
@@ -446,6 +472,10 @@ bool Application::CreateVertexBuffers() {
     const UINT YoffSize = static_cast<UINT>(m_instancePosY.size() * sizeof(float));
     const UINT instColSize = static_cast<UINT>(m_instanceColors.size() * sizeof(DirectX::XMFLOAT3));
 
+    // [수정] Y 좌표 버퍼를 3프레임 분량으로 생성
+    UINT oneFrameSize = m_maxInstanceCount * sizeof(float);
+    UINT totalBufferSize = oneFrameSize * FRAME_COUNT;
+
     // 복사 명령을 기록하기 위해 커맨드 리스트를 리셋합니다.
     commandAllocator->Reset();
     commandList->Reset(commandAllocator, nullptr);
@@ -465,7 +495,7 @@ bool Application::CreateVertexBuffers() {
     ThrowIfFailed(device->CreateCommittedResource(&defaultHeapProps, D3D12_HEAP_FLAG_NONE, &XoffDesc,
         D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&m_instancePosXBuffer)));
 
-    auto YoffDesc = CD3DX12_RESOURCE_DESC::Buffer(YoffSize);
+    auto YoffDesc = CD3DX12_RESOURCE_DESC::Buffer(totalBufferSize);
     ThrowIfFailed(device->CreateCommittedResource(&uploadHeapProps, D3D12_HEAP_FLAG_NONE, &YoffDesc,
         D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&m_instancePosYBuffer)));
 
@@ -493,6 +523,8 @@ bool Application::CreateVertexBuffers() {
     xUpload->Map(0, nullptr, &pData);
     memcpy(pData, m_instancePosX.data(), XoffSize);
     xUpload->Unmap(0, nullptr);
+
+    m_instancePosYBuffer->Map(0, nullptr, &m_posYMappedPtr);
 
     colUpload->Map(0, nullptr, &pData);
     memcpy(pData, m_instanceColors.data(), instColSize);

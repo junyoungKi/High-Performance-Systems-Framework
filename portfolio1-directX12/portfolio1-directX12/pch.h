@@ -29,6 +29,7 @@ extern bool g_UseWarp;
 #include <future> // std::future, std::async 사용을 위해 필수
 #include <thread>
 #include <queue>
+
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
