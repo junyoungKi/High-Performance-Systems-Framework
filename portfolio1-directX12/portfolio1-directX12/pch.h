@@ -25,6 +25,7 @@ extern bool g_UseWarp;
 
 // 프로젝트 전역 헬퍼
 #include "Helpers.h"
+#include "JobSystem.h"
 
 #include <future> // std::future, std::async 사용을 위해 필수
 #include <thread>

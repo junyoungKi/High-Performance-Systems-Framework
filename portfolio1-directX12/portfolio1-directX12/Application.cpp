@@ -11,6 +11,11 @@ bool Application::Initialize(HINSTANCE hInstance, int width, int height) {
     // 2. 워커 자원 배열(vector) 크기 설정
     m_workers.resize(NUM_THREADS);
 
+    m_localQueues.clear();
+    for (uint32_t i = 0; i < NUM_THREADS; ++i) {
+        m_localQueues.emplace_back(std::make_unique<WorkerQueue>());
+    }
+
     if (!m_window.Create(hInstance, L"DX12WindowClass", L"DX12 Engine Renderer", width, height, this))
         return false;
 
@@ -32,7 +37,7 @@ bool Application::Initialize(HINSTANCE hInstance, int width, int height) {
 
     // 스레드 풀 생성: NUM_THREADS만큼 워커 스레드 미리 실행
     for (uint32_t i = 0; i < NUM_THREADS; ++i) {
-        m_threadPool.emplace_back(&Application::WorkerThreadLoop, this);
+        m_threadPool.emplace_back(&Application::WorkerThreadLoop, this, i);
     }
 
     m_IsInitialized = true;
@@ -49,8 +54,8 @@ Application::~Application() {
     for (auto& thread : m_threadPool) thread.join();
 }
 
-void Application::WorkerThreadLoop() {
-    while (true) {
+void Application::WorkerThreadLoop(uint32_t threadIndex) {
+    /*while (true) {
         std::function<void()> task;
         {
             std::unique_lock<std::mutex> lock(m_queueMutex);
@@ -60,6 +65,49 @@ void Application::WorkerThreadLoop() {
             m_tasks.pop();
         }
         task();
+    }*/
+    while (!m_stopThreads) {
+        std::optional<Job> job = m_localQueues[threadIndex]->Pop();
+
+        // 1. 내 큐가 비었다면 다른 스레드에서 훔치기 (Work Stealing)
+        if (!job) {
+            for (uint32_t i = 0; i < NUM_THREADS; ++i) {
+                if (i == threadIndex) continue;
+                job = m_localQueues[i]->Steal();
+                if (job) break; // 성공적으로 훔침
+            }
+        }
+
+        // 2. 일을 찾았다면 실행
+        if (job) {
+            job->task();
+            if (job->counter) job->counter->fetch_sub(1);
+        }
+        else {
+            // 3. 정말 일이 없다면 잠시 양보
+            std::this_thread::yield();
+        }
+    }
+}
+
+void Application::WaitForJobs(std::atomic<int>& counter) {
+    while (counter.load() > 0) {
+        // 메인 스레드도 워커 중 하나처럼 행동하여 전체 처리량 향상
+        std::optional<Job> job;
+
+        // 내 로컬 큐(예: 0번)에서 찾거나 스틸 시도
+        for (uint32_t i = 0; i < NUM_THREADS; ++i) {
+            job = m_localQueues[i]->Steal();
+            if (job) break;
+        }
+
+        if (job) {
+            job->task();
+            if (job->counter) job->counter->fetch_sub(1);
+        }
+        else {
+            std::this_thread::yield();
+        }
     }
 }
 
@@ -69,6 +117,43 @@ void Application::EnqueueTask(std::function<void()> task) {
         m_tasks.push(std::move(task));
     }
     m_condition.notify_one();
+}
+
+void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt) {
+    // --- SIMD (SSE) 시작 ---
+    // --- AVX-256 ---
+    int i = static_cast<int>(start);
+
+    // 8개 슬롯(256비트)에 동일한 값 채우기
+    __m256 vDt = _mm256_set1_ps(dt);
+    __m256 vBottom = _mm256_set1_ps(-1.1f);
+    __m256 vTop = _mm256_set1_ps(1.1f);
+
+    // 8개씩 묶어서 처리 (i += 8)
+    for (; i <= static_cast<int>(end) - 8; i += 8) {
+        // 1. 데이터 로드 (y좌표 8개, 속도 8개)
+        __m256 vPosY = _mm256_load_ps(&m_instancePosY[i]);
+        __m256 vSpeed = _mm256_load_ps(&m_instanceSpeeds[i]);
+
+        // 2. 연산: posY -= speed * dt
+        __m256 vDelta = _mm256_mul_ps(vSpeed, vDt);
+        vPosY = _mm256_sub_ps(vPosY, vDelta);
+
+        // 3. 조건 처리 (Masking): if (y < -1.1f) y = 1.1f
+        // _CMP_LT_OQ: Less-than, Ordered, Non-signaling
+        __m256 vMask = _mm256_cmp_ps(vPosY, vBottom, _CMP_LT_OQ);
+        vPosY = _mm256_blendv_ps(vPosY, vTop, vMask);
+
+        // 4. 결과 저장
+        _mm256_store_ps(&m_instancePosY[i], vPosY);
+    }
+
+    // 남은 자투리 데이터 처리 (최대 7개)
+    for (; i < static_cast<int>(end); ++i) {
+        m_instancePosY[i] -= m_instanceSpeeds[i] * dt;
+        if (m_instancePosY[i] < -1.1f) m_instancePosY[i] = 1.1f;
+    }
+    // --- SIMD 종료 ---
 }
 
 void Application::Run() {
@@ -148,53 +233,26 @@ void Application::Update() {
     }
     else {
         // 1. 남은 작업 개수를 추적할 원자적 카운터
-        std::atomic<int> remainingTasks(NUM_THREADS);
+        std::atomic<int> jobsCounter(0);
+        uint32_t totalJobs = NUM_THREADS;
+        jobsCounter.store(totalJobs);
 
-        for (int t = 0; t < NUM_THREADS; ++t) {
-            int start = t * m_instancesPerThread;
-            int end = (t == NUM_THREADS - 1) ? m_instanceCount : (t + 1) * m_instancesPerThread;
+        for (uint32_t t = 0; t < totalJobs; ++t) {
+            uint32_t start = t * m_instancesPerThread;
+            uint32_t end = (t == totalJobs - 1) ? m_instanceCount : (t + 1) * m_instancesPerThread;
 
-            EnqueueTask([this, start, end, dt, &remainingTasks]() {
-                // --- SIMD (SSE) 시작 ---
-                // --- AVX-256 ---
-                int i = start;
+            Job physicsJob;
+            physicsJob.task = [this, start, end, dt]() {
+                this->ExecutePhysicsSIMD(start, end, dt); 
+            };
+            physicsJob.counter = &jobsCounter;
 
-                // 8개 슬롯(256비트)에 동일한 값 채우기
-                __m256 vDt = _mm256_set1_ps(dt);
-                __m256 vBottom = _mm256_set1_ps(-1.1f);
-                __m256 vTop = _mm256_set1_ps(1.1f);
-
-                // 8개씩 묶어서 처리 (i += 8)
-                for (; i <= end - 8; i += 8) {
-                    // 1. 데이터 로드 (y좌표 8개, 속도 8개)
-                    __m256 vPosY = _mm256_load_ps(&m_instancePosY[i]);
-                    __m256 vSpeed = _mm256_load_ps(&m_instanceSpeeds[i]);
-
-                    // 2. 연산: posY -= speed * dt
-                    __m256 vDelta = _mm256_mul_ps(vSpeed, vDt);
-                    vPosY = _mm256_sub_ps(vPosY, vDelta);
-
-                    // 3. 조건 처리 (Masking): if (y < -1.1f) y = 1.1f
-                    // _CMP_LT_OQ: Less-than, Ordered, Non-signaling
-                    __m256 vMask = _mm256_cmp_ps(vPosY, vBottom, _CMP_LT_OQ);
-                    vPosY = _mm256_blendv_ps(vPosY, vTop, vMask);
-
-                    // 4. 결과 저장
-                    _mm256_store_ps(&m_instancePosY[i], vPosY);
-                }
-
-                // 남은 자투리 데이터 처리 (최대 7개)
-                for (; i < end; ++i) {
-                    m_instancePosY[i] -= m_instanceSpeeds[i] * dt;
-                    if (m_instancePosY[i] < -1.1f) m_instancePosY[i] = 1.1f;
-                }
-                // --- SIMD 종료 ---
-
-                remainingTasks--;
-                });
+            // 큐에 넣는 행위는 람다 외부(메인 스레드)에서 수행
+            m_localQueues[t % NUM_THREADS]->Push(std::move(physicsJob));
         }
 
-        while (remainingTasks > 0) { std::this_thread::yield(); }
+        // 메인 스레드도 대기하지 않고 일을 도움
+        WaitForJobs(jobsCounter);
     }
 
     /* erase for ring buffer and reducing overhead.

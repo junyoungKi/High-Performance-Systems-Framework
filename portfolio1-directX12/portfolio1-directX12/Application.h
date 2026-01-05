@@ -91,8 +91,11 @@ private:
     // 간단한 스레드 풀 구현
     using float32_vec = std::vector<float, AlignedAllocator<float, 32>>;
 
-    void WorkerThreadLoop();
+    void WorkerThreadLoop(uint32_t threadIndex);
+    void WaitForJobs(std::atomic<int>& counter);
     void EnqueueTask(std::function<void()> task);
+
+    void ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt);
 
     std::vector<std::thread> m_threadPool;
     std::queue<std::function<void()>> m_tasks;
@@ -148,6 +151,7 @@ private:
     ThreadWorker m_mainPost;
     // 고정 배열 대신 vector를 사용합니다.
     std::vector<ThreadWorker> m_workers;
+    std::vector<std::unique_ptr<WorkerQueue>> m_localQueues;
 
     uint32_t m_instancesPerThread;
 

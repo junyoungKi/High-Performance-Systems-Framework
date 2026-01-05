@@ -838,8 +838,77 @@ GPU가 각 프레임에 맞는 데이터를 정확히 읽어가도록 뷰를 조
 
 
 
+## 1️⃣ 멀티스레드 구조
+
+- `WorkerThreadLoop()`
+  
+  - 각 워커 스레드는 **무한 루프** 돌면서 `m_tasks` 큐에서 태스크를 가져감
+  
+  - `std::mutex` + `std::condition_variable` 로 안전하게 큐 접근
+
+✅ **즉, 멀티스레드 실행 구조 완성**
+
+- 여러 스레드가 동시에 큐에서 태스크 가져와 실행 가능
+
+- 큐에 태스크가 없으면 sleep 상태 → CPU 낭비 없음
+
+---
+
+## 2️⃣ 잡(Task) 개념
+
+- `EnqueueTask`로 태스크를 큐에 넣음
+
+- 태스크는 `std::function<void()>`
+
+- 태스크 내부에서:
+  
+  - 각 워커 스레드별 커맨드 리스트를 reset
+  
+  - Render 상태 세팅
+  
+  - `DrawInstanced` 호출
+  
+  - promise에 결과 전달
+
+✅ **즉, 작업 단위(Job) = 한 범위의 인스턴스를 그리는 함수**
+
+- Start / End 범위로 스레드별 나눔 → 작업 단위(Job)로 처리
+
+- 잡 단위가 **독립적이고 재사용 가능** → Job System 핵심 특징
+
+---
+
+## 3️⃣ `std::promise` 사용 의미
+
+- 각 태스크가 **완료되면 결과(CommandList*)를 main thread로 전달**
+
+- main thread가 future.get()으로 기다릴 수 있음
+
+✅ **동기화 포인트가 생김 → frame 제출 시점에서 race condition 방지**
+
+---
+
+## 4️⃣ 개선하면 완전한 Job System 느낌
+
+지금 코드도 충분히 실용적이지만, **상용 엔진 수준 Job System** 특징과 비교하면:
+
+| 특징                 | 지금 코드        | 완전한 Job System             |
+| ------------------ | ------------ | -------------------------- |
+| Task 독립성           | 있음           | 있음                         |
+| Work Stealing      | ❌            | 있음 (스레드 유휴시 다른 스레드 작업 가져감) |
+| Dynamic Scheduling | 제한적          | 스레드 풀 전체에서 자동 배분           |
+| 태스크 그래프            | ❌            | Task 간 의존성 처리 가능           |
+| Lightweight Handle | std::promise | JobHandle / Future         |
+
+즉, **현재 코드는 Job System의 핵심 “멀티스레드 태스크 실행 + future 동기화”만 구현한 상태**.  
+Work-stealing, 태스크 그래프, 의존성 관리까지 넣으면 상용 엔진 수준 Job System이 됨.
+
+
+
 Fence 동기화?
 
 스핀락? 
 
 락프리 안하는 이유?
+
+뮤텍스는 복사가 불가능한 동시에 공유 자원이 아니기에 unique_ptr타입을 사용하여 메모리 관리의 신뢰도를 높임과 동시에 벡터로 사용할 수 있게 함.
