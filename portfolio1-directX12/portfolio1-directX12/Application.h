@@ -88,7 +88,7 @@ public:
     ~Application(); // 소멸자에서 스레드 풀 종료 처리
 
 private:
-    // 간단한 스레드 풀 구현
+    // 간단한 스레드 풀 구현, RAII 패턴 유지
     using float32_vec = std::vector<float, AlignedAllocator<float, 32>>;
 
     void WorkerThreadLoop(uint32_t threadIndex);
