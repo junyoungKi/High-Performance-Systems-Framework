@@ -131,58 +131,69 @@ void Application::Update() {
     // 위치값만 연속적으로 순회하므로 캐시 효율이 매우 높습니다.
     float dt = std::chrono::duration<float>(deltaTime).count();
 
-    // 1. 남은 작업 개수를 추적할 원자적 카운터
-    std::atomic<int> remainingTasks(NUM_THREADS);
+    const uint32_t MIN_INSTANCES_FOR_THREADS = 1000;
 
-    for (int t = 0; t < NUM_THREADS; ++t) {
-        int start = t * m_instancesPerThread;
-        int end = (t == NUM_THREADS - 1) ? m_instanceCount : (t + 1) * m_instancesPerThread;
-
-        EnqueueTask([this, start, end, dt, &remainingTasks]() {
-            // --- SIMD (SSE) 시작 ---
-            // --- AVX-256 ---
-            int i = start;
-
-            // 8개 슬롯(256비트)에 동일한 값 채우기
-            __m256 vDt = _mm256_set1_ps(dt);
-            __m256 vBottom = _mm256_set1_ps(-1.1f);
-            __m256 vTop = _mm256_set1_ps(1.1f);
-
-            // 8개씩 묶어서 처리 (i += 8)
-            for (; i <= end - 8; i += 8) {
-                // 1. 데이터 로드 (y좌표 8개, 속도 8개)
-                __m256 vPosY = _mm256_load_ps(&m_instancePosY[i]);
-                __m256 vSpeed = _mm256_load_ps(&m_instanceSpeeds[i]);
-
-                // 2. 연산: posY -= speed * dt
-                __m256 vDelta = _mm256_mul_ps(vSpeed, vDt);
-                vPosY = _mm256_sub_ps(vPosY, vDelta);
-
-                // 3. 조건 처리 (Masking): if (y < -1.1f) y = 1.1f
-                // _CMP_LT_OQ: Less-than, Ordered, Non-signaling
-                __m256 vMask = _mm256_cmp_ps(vPosY, vBottom, _CMP_LT_OQ);
-                vPosY = _mm256_blendv_ps(vPosY, vTop, vMask);
-
-                // 4. 결과 저장
-                _mm256_store_ps(&m_instancePosY[i], vPosY);
-            }
-
-            // 남은 자투리 데이터 처리 (최대 7개)
-            for (; i < end; ++i) {
-                m_instancePosY[i] -= m_instanceSpeeds[i] * dt;
-                if (m_instancePosY[i] < -1.1f) m_instancePosY[i] = 1.1f;
-            }
-            // --- SIMD 종료 ---
-
-            remainingTasks--;
-            });
+    if (m_instanceCount < MIN_INSTANCES_FOR_THREADS) {
+        // 메인 스레드에서 즉시 처리
+        for (uint32_t i = 0; i < m_instanceCount; ++i) {
+            m_instancePosY[i] -= m_instanceSpeeds[i] * dt;
+            if (m_instancePosY[i] < -1.1f) m_instancePosY[i] = 1.1f;
+        }
     }
+    else {
+        // 1. 남은 작업 개수를 추적할 원자적 카운터
+        std::atomic<int> remainingTasks(NUM_THREADS);
 
-    while (remainingTasks > 0) { std::this_thread::yield(); }
+        for (int t = 0; t < NUM_THREADS; ++t) {
+            int start = t * m_instancesPerThread;
+            int end = (t == NUM_THREADS - 1) ? m_instanceCount : (t + 1) * m_instancesPerThread;
+
+            EnqueueTask([this, start, end, dt, &remainingTasks]() {
+                // --- SIMD (SSE) 시작 ---
+                // --- AVX-256 ---
+                int i = start;
+
+                // 8개 슬롯(256비트)에 동일한 값 채우기
+                __m256 vDt = _mm256_set1_ps(dt);
+                __m256 vBottom = _mm256_set1_ps(-1.1f);
+                __m256 vTop = _mm256_set1_ps(1.1f);
+
+                // 8개씩 묶어서 처리 (i += 8)
+                for (; i <= end - 8; i += 8) {
+                    // 1. 데이터 로드 (y좌표 8개, 속도 8개)
+                    __m256 vPosY = _mm256_load_ps(&m_instancePosY[i]);
+                    __m256 vSpeed = _mm256_load_ps(&m_instanceSpeeds[i]);
+
+                    // 2. 연산: posY -= speed * dt
+                    __m256 vDelta = _mm256_mul_ps(vSpeed, vDt);
+                    vPosY = _mm256_sub_ps(vPosY, vDelta);
+
+                    // 3. 조건 처리 (Masking): if (y < -1.1f) y = 1.1f
+                    // _CMP_LT_OQ: Less-than, Ordered, Non-signaling
+                    __m256 vMask = _mm256_cmp_ps(vPosY, vBottom, _CMP_LT_OQ);
+                    vPosY = _mm256_blendv_ps(vPosY, vTop, vMask);
+
+                    // 4. 결과 저장
+                    _mm256_store_ps(&m_instancePosY[i], vPosY);
+                }
+
+                // 남은 자투리 데이터 처리 (최대 7개)
+                for (; i < end; ++i) {
+                    m_instancePosY[i] -= m_instanceSpeeds[i] * dt;
+                    if (m_instancePosY[i] < -1.1f) m_instancePosY[i] = 1.1f;
+                }
+                // --- SIMD 종료 ---
+
+                remainingTasks--;
+                });
+        }
+
+        while (remainingTasks > 0) { std::this_thread::yield(); }
+    }
 
     void* pData = nullptr;
     m_instancePosYBuffer->Map(0, nullptr, &pData);
-    memcpy(pData, m_instancePosY.data(), m_instancePosY.size() * sizeof(float));
+    memcpy(pData, m_instancePosY.data(), m_instanceCount * sizeof(float));
     m_instancePosYBuffer->Unmap(0, nullptr);
 
 }
@@ -214,10 +225,18 @@ void Application::Render() {
 
     std::vector<std::shared_ptr<std::promise<ID3D12CommandList*>>> promises;
     for (uint32_t t = 0; t < NUM_THREADS; ++t) {
-        auto p = std::make_shared<std::promise<ID3D12CommandList*>>();
-        promises.push_back(p);
+        // 각 스레드가 그릴 범위를 정확히 계산 (나머지 포함)
+        uint32_t start = t * m_instancesPerThread;
+        uint32_t end = (t == NUM_THREADS - 1) ? m_instanceCount : (t + 1) * m_instancesPerThread;
+        uint32_t countToDraw = (end > start) ? (end - start) : 0;
 
-        EnqueueTask([this, t, frameIndex, rtv, vp, sc, p]() {
+        // 그릴 게 없는 스레드는 태스크를 생성하지 않음
+        if (countToDraw == 0) continue;
+
+        auto promise = std::make_shared<std::promise<ID3D12CommandList*>>();
+        promises.push_back(promise);
+
+        EnqueueTask([this, t, frameIndex, rtv, vp, sc, promise, start, countToDraw]() {
             auto& worker = m_workers[t];
             auto alloc = worker.commandAllocators[frameIndex].Get();
             auto list = worker.commandList.Get();
@@ -235,9 +254,9 @@ void Application::Render() {
             D3D12_VERTEX_BUFFER_VIEW vbvs[] = { m_positionBufferView, m_instancePosXView, m_instancePosYView, m_instanceColorView };
             list->IASetVertexBuffers(0, 4, vbvs);
 
-            list->DrawInstanced(3, m_instancesPerThread, 0, t * m_instancesPerThread);
+            list->DrawInstanced(3, countToDraw, 0, start);
             list->Close();
-            p->set_value(list);
+            promise->set_value(list);
             });
     }
 

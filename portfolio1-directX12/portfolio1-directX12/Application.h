@@ -61,6 +61,31 @@ public:
 
     bool InitImGui();
 
+
+    // 새로운 삼각형 생성 (Allocate 역할)    !!!!!!나중에 구현부로 옮길 것!!!!!!
+    uint32_t CreateTriangle() {
+        if (m_freeIndices.empty()) {
+            return m_instanceCount++; // 빈 칸 없으면 뒤에 추가
+        }
+        uint32_t index = m_freeIndices.back();
+        m_freeIndices.pop_back();
+        return index;
+    }
+
+    // 삼각형 삭제 (Free 역할 - Swap & Pop 방식)
+    void DeleteTriangle(uint32_t index) {
+        uint32_t lastIndex = m_instanceCount - 1;
+        if (index != lastIndex) {
+            // 마지막 데이터를 삭제된 위치로 복사 (이동)
+            m_instancePosX[index] = m_instancePosX[lastIndex];
+            m_instancePosY[index] = m_instancePosY[lastIndex];
+            m_instanceSpeeds[index] = m_instanceSpeeds[lastIndex];
+            m_instanceColors[index] = m_instanceColors[lastIndex];
+        }
+        m_instanceCount--; // 전체 활성 개수만 줄임
+        // 데이터는 항상 0 ~ m_instanceCount까지 꽉 차 있게 됨 -> SIMD 최적 유지
+    }
+
     ~Application(); // 소멸자에서 스레드 풀 종료 처리
 
 private:
@@ -112,8 +137,9 @@ private:
     D3D12_VERTEX_BUFFER_VIEW m_instanceColorView;
     D3D12_VERTEX_BUFFER_VIEW m_instancePosXView;
     D3D12_VERTEX_BUFFER_VIEW m_instancePosYView;
+    std::vector<uint32_t> m_freeIndices; // 사용 가능한 빈 칸 목록
 
-    static const uint32_t NUM_THREADS = 10; // 사용할 스레드 개수
+    static const uint32_t NUM_THREADS = 20; // 사용할 스레드 개수
     ThreadWorker m_mainPre;
     ThreadWorker m_mainPost;
     ThreadWorker m_workers[NUM_THREADS];
