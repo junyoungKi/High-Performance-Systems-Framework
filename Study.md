@@ -799,3 +799,39 @@ AI가 짠 코드라 하더라도, 아래의 답변들을 자신의 논리로 소
 **"내가 이 코드를 짠 이유는 바로 이런 하드웨어적 근거가 있었기 때문이다"**라는 논리만 세워진다면, 구현 과정에서 AI의 도움을 받았다는 사실은 오히려 **"최신 도구를 활용해 복잡한 시스템을 설계할 줄 아는 능력"**으로 평가받을 것입니다.
 
 추가로 면접 대비를 위해 **"SoA 구조에서 데이터 삭제 시 발생하는 Swap & Pop 방식의 장점"**에 대해서도 준비해 드릴까요? 이 프로젝트 코드에 이미 구현되어 있는 부분이라 물어볼 확률이 높거든요!
+
+
+
+네, 제공해주신 코드에는 **`m_instancePosY` 데이터를 처리하기 위한 링 버퍼(Ring Buffer) 기법이 핵심적으로 적용되어 있습니다.**
+
+구체적으로 코드의 어느 부분에 어떻게 적용되어 있는지 정리해 드립니다.
+
+### 1. 링 버퍼 메모리 할당 및 Persistent Mapping
+
+`CreateVertexBuffers` 함수에서 링 버퍼의 기반을 마련하고 있습니다.
+
+- **프레임별 공간 확보**: `UINT totalBufferSize = oneFrameSize * FRAME_COUNT;`를 통해 백버퍼 개수(`FRAME_COUNT`, 보통 3)만큼의 거대한 업로드 버퍼 공간을 한 번에 할당합니다.
+
+- **Persistent Mapping**: `m_instancePosYBuffer->Map(0, nullptr, &m_posYMappedPtr);`를 호출하여 초기화 시 딱 한 번만 포인터를 열어둡니다. 이후 `Unmap` 없이 프로그램 종료 시까지 이 포인터(`m_posYMappedPtr`)를 계속 사용하는데, 이것이 DX12 고성능 전송의 핵심인 **Persistent Mapping** 기법입니다.
+
+### 2. `Update()`에서의 데이터 쓰기 (CPU -> Buffer)
+
+매 프레임 호출되는 `Update` 함수에서 현재 프레임에 해당하는 메모리 영역에 데이터를 복사합니다.
+
+- **프레임 인덱스 참조**: `frameIndex = m_renderDevice.GetCurrentBackBufferIndex();`를 통해 현재 GPU가 처리할 프레임 번호를 가져옵니다.
+
+- **오프셋 계산**: `frameIndex * oneFrameOffset`을 계산하여 전체 버퍼 중 **현재 프레임에 할당된 시작 주소**를 찾아냅니다.
+
+- **직접 복사**: `memcpy`를 통해 SIMD 연산이 완료된 `m_instancePosY` 데이터를 해당 영역에 바로 덮어씁니다. 이 과정에서 `Map/Unmap` API 호출이 없으므로 오버헤드가 극도로 낮습니다.
+
+### 3. `Render()`에서의 데이터 읽기 (GPU <- Buffer)
+
+GPU가 각 프레임에 맞는 데이터를 정확히 읽어가도록 뷰를 조정합니다.
+
+- **주소 오프셋 이동**: `D3D12_GPU_VIRTUAL_ADDRESS currentGPUAddress = m_instancePosYBuffer->GetGPUVirtualAddress() + (frameIndex * oneFrameOffset);`를 통해 GPU가 바라볼 시작 주소를 현재 프레임 영역으로 옮겨줍니다.
+
+- **VBV 업데이트**: 인스턴스 버텍스 버퍼 뷰(`m_instancePosYView`)의 `BufferLocation`을 위에서 계산한 주소로 업데이트하여, `DrawInstanced` 호출 시 GPU가 충돌 없이 자기 프레임의 데이터만 읽게 만듭니다.
+
+### 결론
+
+사용자님의 코드는 **"CPU는 다음 프레임 데이터를 쓰고, GPU는 이전 프레임 데이터를 읽는"** 전형적인 링 버퍼 기반의 병렬 파이프라인이 구현되어 있습니다. 시스템 프로그래머 포트폴리오로서 이 부분을 설명할 때, **"Persistent Mapping과 프레임 인덱스 기반의 오프셋 관리를 통해 CPU-GPU 간의 데이터 경합(Hazard)을 방지하고 전송 오버헤드를 최소화했다"**고 강조하시면 됩니다.
