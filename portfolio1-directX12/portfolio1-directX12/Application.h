@@ -101,6 +101,7 @@ private:
     std::mutex m_queueMutex;
     std::condition_variable m_condition;
     bool m_stopThreads = false;
+    bool m_multiThread = false;
 
     Window m_window;
     RenderDevice m_renderDevice;

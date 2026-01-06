@@ -192,6 +192,9 @@ void Application::Update() {
     if (ImGui::Checkbox("Enable VSync", &vsync)) {
         m_renderDevice.SetVSync(vsync);
     }
+
+    ImGui::Checkbox("Enable Multi-Thread", &m_multiThread);
+
     ImGui::End();
 
     // 2. 시간 관리 및 델타 타임 계산
@@ -224,7 +227,7 @@ void Application::Update() {
     auto physicsStart = std::chrono::high_resolution_clock::now();
 
     const uint32_t MIN_INSTANCES_FOR_THREADS = 1000;
-    if (m_instanceCount < MIN_INSTANCES_FOR_THREADS) {
+    if (m_instanceCount < MIN_INSTANCES_FOR_THREADS || !m_multiThread) {
         // 메인 스레드에서 즉시 처리
         for (uint32_t i = 0; i < m_instanceCount; ++i) {
             m_instancePosY[i] -= m_instanceSpeeds[i] * dt;

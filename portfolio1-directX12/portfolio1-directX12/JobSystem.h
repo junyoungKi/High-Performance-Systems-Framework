@@ -40,6 +40,7 @@ struct Job {
 // [3] 스핀락이 적용된 WorkerQueue 
 // alignas와 하드웨어별 캐시라인 크기 함수로 가짜 공유, 
 // 캐시 라인 두 개에 걸쳐서 읽는(Cache Line Split) 현상을 방지
+// 단, 호환성 문제로 64로 패딩 고정하는 것도 가능.
 struct alignas(std::hardware_destructive_interference_size) WorkerQueue {
     std::deque<Job> queue;
     Spinlock spin; // std::mutex 제거
