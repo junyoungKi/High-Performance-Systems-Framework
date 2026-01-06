@@ -1,41 +1,66 @@
 #pragma once
-#include <thread>
 #include <atomic>
+#include <optional>
 #include <deque>
 #include <functional>
-#include <vector>
-#include <optional>
-#include <mutex>
+#include <immintrin.h> // _mm_pause() 사용을 위해 필수
 
-// 1. 잡 단위 정의
-struct Job {
-    std::function<void()> task;
-    std::atomic<int>* counter = nullptr; // 잡 그룹의 동기화를 위한 카운터
+// [1] 커스텀 스핀락 클래스
+class Spinlock {
+private:
+    std::atomic_flag flag = ATOMIC_FLAG_INIT;
+
+public:
+    void lock() {
+        // 락을 얻을 때까지 계속 확인 (Busy-waiting)
+        while (flag.test_and_set(std::memory_order_acquire)) {
+            // CPU에게 현재 스핀 루프 중임을 알려 파이프라인 성능 저하 및 전력 소모 방지
+            _mm_pause();
+        }
+    }
+
+    void unlock() {
+        flag.clear(std::memory_order_release);
+    }
 };
 
-// 2. 스레드별 로컬 큐 (간단한 구현을 위해 뮤텍스 포함)
+// [2] 안전한 락 관리를 위한 RAII Guard (선택 사항이지만 권장)
+struct SpinlockGuard {
+    Spinlock& spin;
+    SpinlockGuard(Spinlock& s) : spin(s) { spin.lock(); }
+    ~SpinlockGuard() { spin.unlock(); }
+};
+
+struct Job {
+    std::function<void()> task;
+    std::atomic<int>* counter = nullptr;  // 동기화 카운터
+};
+
+// [3] 스핀락이 적용된 WorkerQueue
 struct WorkerQueue {
     std::deque<Job> queue;
-    std::mutex mutex;
+    Spinlock spin; // std::mutex 제거
 
     void Push(Job job) {
-        std::lock_guard<std::mutex> lock(mutex);
-        queue.push_back(std::move(job));  // malloc called !
+        SpinlockGuard lock(spin);
+        queue.push_back(std::move(job));  // malloc !!
     }
 
     std::optional<Job> Pop() {
-        std::lock_guard<std::mutex> lock(mutex);
+        SpinlockGuard lock(spin);
         if (queue.empty()) return std::nullopt;
-        Job job = std::move(queue.back()); // LIFO: 캐시 효율을 위해 최근 것을 먼저
-        queue.pop_back();  // malloc called !
+
+        Job job = std::move(queue.back());  // LIFO 캐시 효율을 위해 최근 것을 먼저
+        queue.pop_back();  // malloc !!
         return job;
     }
 
     std::optional<Job> Steal() {
-        std::lock_guard<std::mutex> lock(mutex);
+        SpinlockGuard lock(spin);
         if (queue.empty()) return std::nullopt;
-        Job job = std::move(queue.front()); // FIFO: 스틸은 오래된 것부터
-        queue.pop_front();  
+
+        Job job = std::move(queue.front());  // FIFO 스틸은 오래된 것부터
+        queue.pop_front();
         return job;
     }
 };
