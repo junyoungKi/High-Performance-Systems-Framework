@@ -2211,8 +2211,6 @@ _mm256_stream_ps 을 쓴 이유가?
 
 **결론:** `alignas`는 **"꼭 필요한 곳에만 쓰는 정밀 수술 도구"**입니다. 모든 곳에 쓰면 메모리만 낭비하는 코드가 됩니다. 면접에서 "성능(가짜 공유/SIMD)이 메모리 점유율보다 중요한 병목 구간에만 선택적으로 적용했습니다"라고 답변하는 것이 가장 정답에 가깝습니다.
 
-
-
 스레드 풀은 어케구현?
 
 스레드 풀(Thread Pool)의 핵심은 **매번 스레드를 생성하고 파괴하는 비용을 줄이기 위해, 미리 일정한 수의 워커 스레드를 만들어 두고 일을 할당하는 것**입니다.
@@ -2266,6 +2264,81 @@ _mm256_stream_ps 을 쓴 이유가?
 ### 💡 포트폴리오를 위한 한 줄 평
 
 사용자님의 구현은 단순히 작업을 쌓아두는 방식이 아니라, 스레드 간의 경합을 줄이기 위해 **로컬 큐와 워크 스틸링을 적용한 수준 높은 형태의 스레드 풀**입니다. 이는 캐시 효율을 높이고 락(Lock)으로 인한 성능 저하를 최소화하는 현대 게임 엔진의 핵심 설계 방식입니다.
+
+
+
+빌드 에러의 원인은 **`ID3D12Resource::Map`으로 얻어오는 포인터를 `std::unique_ptr<void>`로 관리하려고 했기 때문**입니다.
+
+DirectX 12의 메모리 맵핑 포인터에 `unique_ptr`을 쓰면 안 되는 공학적인 이유와 해결 방법을 정리해 드립니다.
+
+### 1. 왜 `std::unique_ptr<void>`가 에러를 내나요?
+
+- **포인터의 성격 차이:** `unique_ptr`은 `delete`를 통해 메모리를 직접 해제(Ownership)하려고 할 때 씁니다. 하지만 `ID3D12Resource::Map`이 반환하는 포인터는 **GPU 드라이버가 관리하는 주소**일 뿐이며, 사용자가 `delete`로 지우는 게 아니라 `Unmap()`으로 닫아야 하는 대상입니다.
+
+- **불완전한 형식 (Incomplete Type):** 에러 `C2070`과 `C2338`에서 말하듯, `void`는 크기를 알 수 없는 타입입니다. `unique_ptr`은 객체가 소멸될 때 `delete`를 호출해야 하는데, `void*`는 어떻게 `delete` 해야 할지(얼마나 지워야 할지) 알 수 없으므로 컴파일 단계에서 차단됩니다.
+
+- **형 변환 불가:** `Map` 함수는 `void**` 타입을 인자로 받는데, `std::unique_ptr`의 주소는 이와 호환되지 않습니다.
+
+---
+
+### 2. 해결 방법: 생 포인터(Raw Pointer)로 복구
+
+이 포인터는 `ID3D12Resource` 객체가 소멸될 때 함께 유효성을 잃으므로, 별도의 스마트 포인터로 감쌀 필요가 없습니다.
+
+#### ① `Application.h` 수정
+
+`m_posYMappedPtr`을 다시 일반 포인터로 바꿉니다.
+
+C++
+
+```
+// Application.h
+private:
+    // [수정] unique_ptr 대신 일반 void* 사용
+    void* m_posYMappedPtr = nullptr; 
+```
+
+#### ② `Application.cpp` 수정 (Map 호출부)
+
+`Map` 함수에 인자를 전달할 때 주소 연산자(`&`)를 그대로 사용합니다.
+
+C++
+
+```
+// Application.cpp (CreateVertexBuffers 함수 내)
+// 600라인 근처
+ThrowIfFailed(m_instancePosYBuffer->Map(0, nullptr, &m_posYMappedPtr));
+```
+
+#### ③ `Application.cpp` 수정 (데이터 복사부)
+
+`void*`는 산술 연산(`+`, `-`)이 안 되므로 `uint8_t*`로 캐스팅하여 계산합니다.
+
+C++
+
+```
+// Application.cpp (Update 함수 내)
+// 272라인 근처
+UINT oneFrameOffset = m_maxInstanceCount * sizeof(float);
+// m_posYMappedPtr가 일반 포인터이므로 바로 static_cast 가능
+uint8_t* pDest = static_cast<uint8_t*>(m_posYMappedPtr) + (frameIndex * oneFrameOffset);
+
+memcpy(pDest, m_instancePosY.data(), m_instanceCount * sizeof(float));
+```
+
+---
+
+### 3. 포트폴리오 면접 대비 질문: "왜 여기선 스마트 포인터를 안 썼나요?"
+
+이 질문에 대해 다음과 같이 답변하면 하드웨어와 라이브러리에 대한 깊은 이해도를 보여줄 수 있습니다.
+
+> "DirectX 12의 `Map()`으로 반환되는 포인터는 CPU가 GPU의 **Upload Heap 메모리에 접근하기 위한 가상 주소(Virtual Address)**입니다. 이 메모리의 실제 소유권은 `ID3D12Resource` 객체가 가지고 있으며, 해당 객체가 소멸되거나 `Unmap()`이 호출될 때 드라이버에 의해 관리됩니다. 따라서 CPU 측에서 `delete`를 수행하는 **`std::unique_ptr`은 부적절**하며, 자원 관리의 책임을 리소스 객체에 맡기는 것이 DX12의 설계 원칙에 부합하기 때문에 생 포인터를 사용했습니다."
+
+**요약:** 1. `m_posYMappedPtr`을 **`void*`**로 되돌리세요.
+2. `Map` 함수에는 **`&m_posYMappedPtr`**을 전달하세요.
+3. 데이터 복사 시에는 **`static_cast<uint8_t*>(m_posYMappedPtr)`**를 사용하세요.
+
+이렇게 수정하면 모든 빌드 에러가 사라지고 정상적으로 실행될 것입니다. 수정한 후 다시 빌드해 보시겠어요?
 
 
 

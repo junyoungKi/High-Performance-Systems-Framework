@@ -571,3 +571,7 @@ for (uint32_t t = 0; t < totalJobs; ++t) {
 - 결론적으로, 코드는 **고정 청크 방식**으로 짜되, 면접에서는 **비트 연산 정렬 방식의 원리**를 설명하는 것이 취업용으로 가장 좋습니다.
 
 ![](C:\Users\user\AppData\Roaming\marktext\images\2026-01-06-22-23-31-image.png)
+
+
+
+워커큐 스마트포인터로 관리 RAII패턴 준수

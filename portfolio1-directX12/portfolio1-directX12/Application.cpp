@@ -6,15 +6,10 @@ bool Application::Initialize(HINSTANCE hInstance, int width, int height) {
     m_renderDevice.EnableDebugLayer();
 
     // 1. 스레드 개수 결정 (0이 반환될 수 있으므로 최소값 1 보장)
-    uint32_t cores = std::thread::hardware_concurrency();
-    NUM_THREADS = (cores > 1) ? cores - 1 : 1;
+    //uint32_t cores = std::thread::hardware_concurrency();
+    NUM_THREADS = m_jobSystem.GetThreadCount();
     // 2. 워커 자원 배열(vector) 크기 설정
     m_workers.resize(NUM_THREADS);
-
-    m_localQueues.clear();
-    for (uint32_t i = 0; i < NUM_THREADS; ++i) {
-        m_localQueues.emplace_back(std::make_unique<WorkerQueue>());
-    }
 
     if (!m_window.Create(hInstance, L"DX12WindowClass", L"DX12 Engine Renderer", width, height, this))
         return false;
@@ -35,82 +30,82 @@ bool Application::Initialize(HINSTANCE hInstance, int width, int height) {
     if (!CreateWorkerResources())   return false;
     if (!InitImGui())               return false;
 
-    // 스레드 풀 생성: NUM_THREADS만큼 워커 스레드 미리 실행
-    for (uint32_t i = 0; i < NUM_THREADS; ++i) {
-        m_threadPool.emplace_back(&Application::WorkerThreadLoop, this, i);
-    }
+    //// 스레드 풀 생성: NUM_THREADS만큼 워커 스레드 미리 실행
+    //for (uint32_t i = 0; i < NUM_THREADS; ++i) {
+    //    m_threadPool.emplace_back(&Application::WorkerThreadLoop, this, i);
+    //}
 
     m_IsInitialized = true;
     return true;
 }
 
 // 소멸자에서 안전하게 스레드 종료
-Application::~Application() {
+Application::~Application() {/*
     {
         std::unique_lock<std::mutex> lock(m_queueMutex);
         m_stopThreads = true;
     }
     m_condition.notify_all();
-    for (auto& thread : m_threadPool) thread.join();
+    for (auto& thread : m_threadPool) thread.join();*/
 }
 
-// Work Stealing 구현 추가
-void Application::WorkerThreadLoop(uint32_t threadIndex) {
-    /*while (true) {
-        std::function<void()> task;
-        {
-            std::unique_lock<std::mutex> lock(m_queueMutex);
-            m_condition.wait(lock, [this] { return m_stopThreads || !m_tasks.empty(); });
-            if (m_stopThreads && m_tasks.empty()) return;
-            task = std::move(m_tasks.front());
-            m_tasks.pop();
-        }
-        task();
-    }*/
-    while (!m_stopThreads) {
-        std::optional<Job> job = m_localQueues[threadIndex]->Pop();
-
-        // 1. 내 큐가 비었다면 다른 스레드에서 훔치기 (Work Stealing)
-        if (!job) {
-            for (uint32_t i = 0; i < NUM_THREADS; ++i) {
-                if (i == threadIndex) continue;
-                job = m_localQueues[i]->Steal();
-                if (job) break; // 성공적으로 훔침
-            }
-        }
-
-        // 2. 일을 찾았다면 실행
-        if (job) {
-            job->task();
-            if (job->counter) job->counter->fetch_sub(1);
-        }
-        else {
-            // 3. 정말 일이 없다면 잠시 양보
-            std::this_thread::yield();
-        }
-    }
-}
-
-void Application::WaitForJobs(std::atomic<int>& counter) {
-    while (counter.load() > 0) {
-        // 메인 스레드도 워커 중 하나처럼 행동하여 전체 처리량 향상
-        std::optional<Job> job;
-
-        // 내 로컬 큐(예: 0번)에서 찾거나 스틸 시도
-        for (uint32_t i = 0; i < NUM_THREADS; ++i) {
-            job = m_localQueues[i]->Steal();
-            if (job) break;
-        }
-
-        if (job) {
-            job->task();
-            if (job->counter) job->counter->fetch_sub(1);
-        }
-        else {
-            std::this_thread::yield();
-        }
-    }
-}
+//// Work Stealing 구현 추가
+//void Application::WorkerThreadLoop(uint32_t threadIndex) {
+//    /*while (true) {
+//        std::function<void()> task;
+//        {
+//            std::unique_lock<std::mutex> lock(m_queueMutex);
+//            m_condition.wait(lock, [this] { return m_stopThreads || !m_tasks.empty(); });
+//            if (m_stopThreads && m_tasks.empty()) return;
+//            task = std::move(m_tasks.front());
+//            m_tasks.pop();
+//        }
+//        task();
+//    }*/
+//    while (!m_stopThreads) {
+//        std::optional<Job> job = m_localQueues[threadIndex]->Pop();
+//
+//        // 1. 내 큐가 비었다면 다른 스레드에서 훔치기 (Work Stealing)
+//        if (!job) {
+//            for (uint32_t i = 0; i < NUM_THREADS; ++i) {
+//                if (i == threadIndex) continue;
+//                job = m_localQueues[i]->Steal();
+//                if (job) break; // 성공적으로 훔침
+//            }
+//        }
+//
+//        // 2. 일을 찾았다면 실행
+//        if (job) {
+//            job->task();
+//            if (job->counter) job->counter->fetch_sub(1);
+//        }
+//        else {
+//            // 3. 정말 일이 없다면 잠시 양보
+//            std::this_thread::yield();
+//        }
+//    }
+//}
+//
+//void Application::WaitForJobs(std::atomic<int>& counter) {
+//    while (counter.load() > 0) {
+//        // 메인 스레드도 워커 중 하나처럼 행동하여 전체 처리량 향상
+//        std::optional<Job> job;
+//
+//        // 내 로컬 큐(예: 0번)에서 찾거나 스틸 시도
+//        for (uint32_t i = 0; i < NUM_THREADS; ++i) {
+//            job = m_localQueues[i]->Steal();
+//            if (job) break;
+//        }
+//
+//        if (job) {
+//            job->task();
+//            if (job->counter) job->counter->fetch_sub(1);
+//        }
+//        else {
+//            std::this_thread::yield();
+//        }
+//    }
+//}
 
 void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt) {
     // --- SIMD (SSE) 시작 ---
@@ -236,27 +231,29 @@ void Application::Update() {
     }
     else {
         // 잡 시스템을 이용한 병렬 처리
-        std::atomic<int> jobsCounter(0); 
+        
         // SIMD(AVX-256) 정렬 조건을 충족하기 위해 8의 배수인 4096을 청크 크기로 설정
         // 이를 통해 모든 잡의 시작 주소가 32바이트 정렬됨을 보장함
         const uint32_t CHUNK_SIZE = 4096;
         uint32_t totalJobs = (m_instanceCount + CHUNK_SIZE - 1) / CHUNK_SIZE;
-        jobsCounter.store(totalJobs);
+        //jobsCounter.store(totalJobs);
+        std::atomic<int> jobsCounter(totalJobs);
 
         for (uint32_t t = 0; t < totalJobs; ++t) {
             uint32_t start = t * CHUNK_SIZE;
             uint32_t end   = std::min(start + CHUNK_SIZE, m_instanceCount);
 
-            Job physicsJob;
+            JobSystem::Job physicsJob;
             physicsJob.task = [this, start, end, dt]() {
                 this->ExecutePhysicsSIMD(start, end, dt);
                 };
             physicsJob.counter = &jobsCounter;
 
-            m_localQueues[t % NUM_THREADS]->Push(std::move(physicsJob));
+            //m_localQueues[t % NUM_THREADS]->Push(std::move(physicsJob));
+            m_jobSystem.Execute(std::move(physicsJob));
         }
         // 메인 스레드도 참여하며 모든 잡이 끝날 때까지 대기
-        WaitForJobs(jobsCounter);
+        m_jobSystem.Wait(jobsCounter);
     }
 
     auto physicsEnd = std::chrono::high_resolution_clock::now();
@@ -329,7 +326,7 @@ void Application::Render() {
 
         renderCounter.fetch_add(1);
 
-        Job renderJob;
+        JobSystem::Job renderJob;
         renderJob.task = [this, t, frameIndex, rtv, vp, sc, start, countToDraw, &workerLists]() {
             auto& worker = m_workers[t];
             auto alloc = worker.commandAllocators[frameIndex].Get();
@@ -354,11 +351,11 @@ void Application::Render() {
             };
         renderJob.counter = &renderCounter;
 
-        m_localQueues[t % NUM_THREADS]->Push(std::move(renderJob));
+        m_jobSystem.Execute(std::move(renderJob));
     }
 
     // 메인 스레드도 대기하면서 일을 도움 (이게 하얀 화면을 해결하는 핵심)
-    WaitForJobs(renderCounter);
+    m_jobSystem.Wait(renderCounter);
 
     // 3. [Main] 수집 및 후처리
     std::vector<ID3D12CommandList*> submitLists;
