@@ -20,14 +20,14 @@ struct WorkerQueue {
 
     void Push(Job job) {
         std::lock_guard<std::mutex> lock(mutex);
-        queue.push_back(std::move(job));
+        queue.push_back(std::move(job));  // malloc called !
     }
 
     std::optional<Job> Pop() {
         std::lock_guard<std::mutex> lock(mutex);
         if (queue.empty()) return std::nullopt;
         Job job = std::move(queue.back()); // LIFO: 캐시 효율을 위해 최근 것을 먼저
-        queue.pop_back();
+        queue.pop_back();  // malloc called !
         return job;
     }
 
@@ -35,7 +35,7 @@ struct WorkerQueue {
         std::lock_guard<std::mutex> lock(mutex);
         if (queue.empty()) return std::nullopt;
         Job job = std::move(queue.front()); // FIFO: 스틸은 오래된 것부터
-        queue.pop_front();
+        queue.pop_front();  
         return job;
     }
 };
