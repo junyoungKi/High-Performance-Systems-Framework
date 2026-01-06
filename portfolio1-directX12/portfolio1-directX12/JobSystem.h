@@ -4,6 +4,7 @@
 #include <deque>
 #include <functional>
 #include <immintrin.h> // _mm_pause() 사용을 위해 필수
+#include <new>
 
 // [1] 커스텀 스핀락 클래스
 class Spinlock {
@@ -36,8 +37,10 @@ struct Job {
     std::atomic<int>* counter = nullptr;  // 동기화 카운터
 };
 
-// [3] 스핀락이 적용된 WorkerQueue
-struct WorkerQueue {
+// [3] 스핀락이 적용된 WorkerQueue 
+// alignas와 하드웨어별 캐시라인 크기 함수로 가짜 공유, 
+// 캐시 라인 두 개에 걸쳐서 읽는(Cache Line Split) 현상을 방지
+struct alignas(std::hardware_destructive_interference_size) WorkerQueue {
     std::deque<Job> queue;
     Spinlock spin; // std::mutex 제거
 
