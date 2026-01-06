@@ -224,10 +224,8 @@ void Application::Update() {
     const uint32_t MIN_INSTANCES_FOR_THREADS = 1000;
     if (m_instanceCount < MIN_INSTANCES_FOR_THREADS || !m_multiThread) {
         // 메인 스레드에서 즉시 처리
-        for (uint32_t i = 0; i < m_instanceCount; ++i) {
-            m_instancePosY[i] -= m_instanceSpeeds[i] * dt;
-            if (m_instancePosY[i] < -1.1f) m_instancePosY[i] = 1.1f;
-        }
+        ExecutePhysicsSIMD(0, m_instanceCount, dt);
+        
     }
     else {
         // 잡 시스템을 이용한 병렬 처리
