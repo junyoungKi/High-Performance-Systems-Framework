@@ -233,13 +233,14 @@ void Application::Update() {
     }
     else {
         // 잡 시스템을 이용한 병렬 처리
-        std::atomic<int> jobsCounter(0);
-        uint32_t totalJobs = NUM_THREADS;
+        std::atomic<int> jobsCounter(0); 
+        const uint32_t CHUNK_SIZE = 4096; // 8의 배수이므로 항상 SIMD 안전
+        uint32_t totalJobs = (m_instanceCount + CHUNK_SIZE - 1) / CHUNK_SIZE;
         jobsCounter.store(totalJobs);
 
         for (uint32_t t = 0; t < totalJobs; ++t) {
-            uint32_t start = t * m_instancesPerThread;
-            uint32_t end = (t == totalJobs - 1) ? m_instanceCount : (t + 1) * m_instancesPerThread;
+            uint32_t start = t * CHUNK_SIZE;
+            uint32_t end   = std::min(start + CHUNK_SIZE, m_instanceCount);
 
             Job physicsJob;
             physicsJob.task = [this, start, end, dt]() {
