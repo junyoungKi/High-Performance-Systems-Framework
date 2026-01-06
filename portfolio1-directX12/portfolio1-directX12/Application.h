@@ -59,6 +59,8 @@ public:
 
     bool CreateWorkerResources();
 
+    void ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt);
+
     bool InitImGui();
 
     // 새로운 삼각형 생성 (Allocate 역할)    !!!!!!나중에 구현부로 옮길 것!!!!!!
@@ -90,8 +92,6 @@ public:
 private:
     // 간단한 스레드 풀 구현, RAII 패턴 유지
     using float32_vec = std::vector<float, AlignedAllocator<float, 32>>;
-
-    void ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt);
 
     JobSystem m_jobSystem;
 

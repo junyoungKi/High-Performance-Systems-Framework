@@ -123,6 +123,14 @@ void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt) {
         __m256 vPosY = _mm256_load_ps(&m_instancePosY[i]);
         __m256 vSpeed = _mm256_load_ps(&m_instanceSpeeds[i]);
 
+        __m256 vTemp = vSpeed;
+        for (int j = 0; j < 30; ++j) {
+            vTemp = _mm256_mul_ps(vTemp, _mm256_set1_ps(1.00001f));
+            vTemp = _mm256_add_ps(vTemp, _mm256_set1_ps(0.00001f));
+            vTemp = _mm256_sub_ps(vTemp, _mm256_set1_ps(0.00001f));
+        }
+        vSpeed = vTemp; // 계산된 결과 반영
+
         // 2. 연산: posY -= speed * dt
         __m256 vDelta = _mm256_mul_ps(vSpeed, vDt);
         vPosY = _mm256_sub_ps(vPosY, vDelta);
