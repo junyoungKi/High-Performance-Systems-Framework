@@ -234,7 +234,9 @@ void Application::Update() {
     else {
         // 잡 시스템을 이용한 병렬 처리
         std::atomic<int> jobsCounter(0); 
-        const uint32_t CHUNK_SIZE = 4096; // 8의 배수이므로 항상 SIMD 안전
+        // SIMD(AVX-256) 정렬 조건을 충족하기 위해 8의 배수인 4096을 청크 크기로 설정
+        // 이를 통해 모든 잡의 시작 주소가 32바이트 정렬됨을 보장함
+        const uint32_t CHUNK_SIZE = 4096;
         uint32_t totalJobs = (m_instanceCount + CHUNK_SIZE - 1) / CHUNK_SIZE;
         jobsCounter.store(totalJobs);
 
