@@ -138,7 +138,7 @@ void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt) {
         vPosY = _mm256_blendv_ps(vPosY, vTop, vMask);
 
         // 4. 결과 저장
-        _mm256_store_ps(&m_instancePosY[i], vPosY);
+        _mm256_stream_ps(&m_instancePosY[i], vPosY);
     }
 
     // 남은 자투리 데이터 처리 (최대 7개)
