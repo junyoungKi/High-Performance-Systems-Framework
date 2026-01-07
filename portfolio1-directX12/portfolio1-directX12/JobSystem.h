@@ -35,7 +35,7 @@ public:
     }
 };
 
-// [2] 안전한 락 관리를 위한 RAII Guard (선택 사항이지만 권장)
+// [2] 안전한 락 관리를 위한 RAII Guard
 struct SpinlockGuard {
     Spinlock& spin;
     SpinlockGuard(Spinlock& s) : spin(s) { spin.lock(); }
@@ -56,7 +56,6 @@ private:
     // 단, 호환성 문제로 64로 패딩 고정하는 것도 가능.
     struct alignas(std::hardware_destructive_interference_size) WorkerQueue {
         
-
         std::deque<Job> queue;
         Spinlock spin; // std::mutex 제거
 
