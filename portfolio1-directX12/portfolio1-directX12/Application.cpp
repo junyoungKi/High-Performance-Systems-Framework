@@ -290,6 +290,8 @@ void Application::Update() {
         m_renderDevice.SetVSync(vsync);
     }
 
+    ImGui::Text("Idle Threads: %d", m_jobSystem.m_idleCount);
+
     ImGui::End();
 
     // 초당 FPS 로그 출력

@@ -44,6 +44,9 @@ void JobSystem::Wait(std::atomic<int>& counter) {
 }
 
 void JobSystem::WorkerThreadLoop(uint32_t threadIndex) {
+
+    uint32_t failCount = 0; // 실패 횟수 카운트
+
     while (!m_stop) {
         std::optional<Job> job = m_workerQueues[threadIndex]->Pop();
 
@@ -54,13 +57,25 @@ void JobSystem::WorkerThreadLoop(uint32_t threadIndex) {
                 if (job) break;
             }
         }
-
         if (job) {
             job->task();
             if (job->counter) job->counter->fetch_sub(1, std::memory_order_release);
         }
         else {
+            m_idleCount++; // 일을 못 찾았을 때만 증가
             std::this_thread::yield();
+            //// --- 지수적 백오프 전략 ---
+            //failCount++;
+            //if (failCount < 1000) {
+            //    _mm_pause(); // 아주 잠깐 스핀 (캐시 성능 유지)
+            //}
+            //else if (failCount < 5000) {
+            //    std::this_thread::yield(); // 타임 슬라이스 양보
+            //}
+            //else {
+            //    // 정말 일이 없으면 1ms 정도 재워서 CPU를 완전히 쉬게 함
+            //    std::this_thread::sleep_for(std::chrono::microseconds(100));
+            //}
         }
     }
 }

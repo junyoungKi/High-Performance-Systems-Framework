@@ -20,6 +20,7 @@ constexpr std::size_t hardware_destructive_interference_size = 64;
 // 스핀락 사용 이유: WorkQueue에서 하는 작업은 단순히 큐에 작업을 넣고 빼는
 // 것으로 소요 시간이 매우 짧기(Low Latency)에 스레드를 잠재우는 것보다 바쁜 대기를 통해
 // 콘텍스트 스위칭 오버헤드를 제거함. 또한 OS의 개입 없이 스스로 깨어남
+// 단, CPU 자원 소모량이 많음으로 소요 시간이 긴 작업에는 부적절.
 class Spinlock {
 private:
     std::atomic_flag flag = ATOMIC_FLAG_INIT;
@@ -97,8 +98,10 @@ public:
     void Wait(std::atomic<int>& counter);
 
     uint32_t GetThreadCount() const { return m_threadCount; }
+    uint32_t m_idleCount = 0; // 이 스레드가 일을 못 찾은 횟수
 
 private:
+
     void WorkerThreadLoop(uint32_t threadIndex);
 
     uint32_t m_threadCount;
