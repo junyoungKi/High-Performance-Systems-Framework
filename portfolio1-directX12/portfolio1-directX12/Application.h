@@ -94,8 +94,10 @@ private:
     using float32_vec = std::vector<float, AlignedAllocator<float, 32>>;
 
     JobSystem m_jobSystem;
+    std::atomic<int> jobsCounter;
 
-    bool m_multiThread = false;
+    bool m_multiThreadPhysics = false;
+    bool m_multiThreadRender = false;
 
     Window m_window;
     RenderDevice m_renderDevice;
@@ -146,6 +148,8 @@ private:
 
     //// 고정 배열 대신 vector를 사용합니다.
     std::vector<ThreadWorker> m_workers;
+    std::vector<ID3D12CommandList*> m_workerLists;
+    std::vector<ID3D12CommandList*> m_submitLists;
 
     uint32_t m_instancesPerThread;
 
@@ -154,5 +158,16 @@ private:
     int m_uiInstanceCount = 10;
 
     float m_physicsLogicTimeMS = 0.0f; // 물리 연산 소요 시간 (ms)
+    float m_renderTimeMS = 0.0f;       // 렌더 소요 시간 (ms)
     float m_gpuCopyTimeMS = 0.0f;      // GPU 데이터 복사 소요 시간 (ms)
+
+    static const int MAX_SAMPLES = 100;
+    float m_physicsHistory[MAX_SAMPLES] = { 0.0f };
+    float m_renderHistory[MAX_SAMPLES] = { 0.0f };
+    float m_totalHistory[MAX_SAMPLES] = { 0.0f };
+    int m_sampleOffset = 0;
+
+    float m_graphTimer = 0.0f;
+    float m_graphUpdateInterval = 0.033f; // 30Hz 샘플링 (그래프 속도 조절)
+
 };

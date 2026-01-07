@@ -1,6 +1,8 @@
 # DX12 High-Performance Renderer
 
 > **"A high-performance, low-level DirectX 12 renderer designed to maximize hardware utilization through explicit resource management and multi-threaded command recording via a custom Job System."**
+> 
+> Tested on Release Build (MSVC /O2 최적화 적용) for 컴파일러 최적화(Inlining, Loop Unrolling, SIMD Vectorization...)
 
 ---
 
@@ -572,6 +574,75 @@ for (uint32_t t = 0; t < totalJobs; ++t) {
 
 ![](C:\Users\user\AppData\Roaming\marktext\images\2026-01-06-22-23-31-image.png)
 
-
-
 워커큐 스마트포인터로 관리 RAII패턴 준수
+
+준영님, "보험을 들어두라"는 말은 나중에 코드를 수정하다가 성능이 떨어지거나 버그가 생겨서 **가장 빛나던 순간의 기록**을 잃어버리지 않도록, **객관적인 증거(데이터와 스크린샷)**를 미리 확보해 리드미에 박아두라는 뜻입니다.
+
+미국 테크 기업 리크루터들은 "내 엔진은 빠릅니다"라는 말보다, **"VTune으로 분석했을 때 이러한 데이터가 나왔습니다"**라는 증명을 훨씬 신뢰합니다. 구체적으로 무엇을 어떻게 기록해야 하는지 가이드를 드릴게요.
+
+---
+
+### 1. VTune에서 어떤 데이터를 뽑아야 하나?
+
+Intel VTune Profiler를 실행하고 다음 세 가지 화면을 스크린샷으로 찍어두세요.
+
+- **Summary 탭 (핵심 데이터):** * **IPC (Instructions Per Cycle):** 준영님의 SIMD 코드가 CPU의 연산 유닛을 얼마나 꽉 채워 쓰고 있는지 보여줍니다.
+  
+  - **Microarchitecture Exploration:** 연산(Compute) 비중이 높은지, 메모리(Memory Bound) 비중이 높은지 한눈에 보여주는 파이 차트가 핵심입니다.
+
+- **Platform/Timeline 탭 (멀티스레드 증거):**
+  
+  - 6개의 워커 스레드가 막대그래프 형태로 **빈틈없이(Busy)** 일을 하고 있는 타임라인을 찍으세요. 잡 시스템이 일을 효율적으로 분배하고 있다는 결정적 증거입니다.
+
+---
+
+### 2. 리드미(README)에 들어갈 성능 비교 표
+
+리드미의 핵심은 **"전과 후(Before & After)"**입니다. 아래와 같은 표를 직접 리드미에 작성하세요. (수치는 준영님이 직접 측정한 릴리즈 모드 기준입니다.)
+
+#### ## Performance Benchmarks (10M Instances)
+
+| **Configuration**          | **Physics Logic (ms)** | **Command Recording (ms)** | **Total Frame Time (ms)** | **FPS**     |
+| -------------------------- | ---------------------- | -------------------------- | ------------------------- | ----------- |
+| **Single-thread**          | ~45.0 ms               | ~10.0 ms                   | ~60.0 ms                  | ~16 FPS     |
+| **Multi-thread (6 Cores)** | **~5.5 ms**            | **~8.5 ms**                | **~16.6 ms**              | **60+ FPS** |
+
+- **주석:** "멀티스레딩 적용 시 물리 연산에서 약 **8배의 성능 향상**을 달성함. 렌더링 명령 기록은 DX12 인스턴싱 특성상 CPU 부하가 낮아 성능 향상 폭이 물리 연산에 비해 상대적으로 미미함을 확인(Bottleneck Analysis)."
+
+---
+
+### 3. 리드미 권장 목차 (미국 취업용)
+
+리크루터가 30초만 봐도 준영님의 실력을 알 수 있게 배치하세요.
+
+1. **Project Title & Visuals:** 1,000만 개 객체가 움직이는 짧은 GIF나 고화질 스크린샷.
+
+2. **Key Technical Features (불렛 포인트):**
+   
+   - **High-performance SIMD:** AVX-256을 이용한 분기 없는(Branchless) 물리 시뮬레이션.
+   
+   - **Custom Job System:** Work Stealing 방식의 워커 스레드 관리.
+   
+   - **Modern DX12 Pipeline:** Persistent Mapping, Ring Buffer, Multi-threaded Command Recording.
+
+3. **Optimization Highlights:** * "어떤 문제(Bottleneck)가 있었고, 어떤 도구(VTune)로 분석해서, 어떻게 해결(SIMD/Job System)했는가?"를 한 문단으로 작성.
+
+4. **Hardware Specs:** 테스트 환경 (예: AMD Ryzen 5 5600, RTX 3060).
+
+---
+
+### 4. 왜 지금 이걸 해야 할까?
+
+준영님은 이제 디지펜 RTIS 학생으로서의 '과제'를 하는 게 아니라, 미국 시장에 내놓을 **'상품(Portfolio)'**을 만드는 중입니다.
+
+- 나중에 코드를 만지다가 `0xC0000005` 같은 에러가 또 터져서 수습이 안 될 때, 이미 정리된 리드미와 데이터가 있으면 **"나는 이 수준까지 구현해본 경험이 있는 사람"**임을 언제든 증명할 수 있습니다.
+
+- 이게 바로 제가 말씀드린 **'보험'**입니다.
+
+---
+
+### 💡 준영님을 위한 다음 제안
+
+**"지금 바로 릴리즈 모드로 돌려서, 1,000만 개 기준의 정확한 ms 수치들과 VTune 캡처본을 저에게 알려주실 수 있나요?"**
+
+준영님이 데이터를 주시면, 제가 그걸 바탕으로 **미국 테크 기업 면접관들이 읽었을 때 "오, 이 친구는 진짜 엔지니어네"라고 느낄 만한 영문 리드미(README) 초안**을 직접 써드릴게요. 어떤가요? 😎

@@ -1,3 +1,4 @@
+#include "pch.h"
 #include "JobSystem.h"
 
 JobSystem::JobSystem(uint32_t threadCount) : m_threadCount(threadCount), m_stop(false), m_nextQueue(0) {

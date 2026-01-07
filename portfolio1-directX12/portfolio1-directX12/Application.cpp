@@ -10,6 +10,10 @@ bool Application::Initialize(HINSTANCE hInstance, int width, int height) {
     NUM_THREADS = m_jobSystem.GetThreadCount();
     // 2. 워커 자원 배열(vector) 크기 설정
     m_workers.resize(NUM_THREADS);
+    m_workerLists.resize(NUM_THREADS);
+
+    // [수정] preList(+1)와 postList(+1) 공간을 포함해 +2를 해줘야 합니다.
+    m_submitLists.resize(NUM_THREADS + 2);
 
     if (!m_window.Create(hInstance, L"DX12WindowClass", L"DX12 Engine Renderer", width, height, this))
         return false;
@@ -113,9 +117,12 @@ void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt) {
     int i = static_cast<int>(start);
 
     // 8개 슬롯(256비트)에 동일한 값 채우기
-    __m256 vDt = _mm256_set1_ps(dt);
-    __m256 vBottom = _mm256_set1_ps(-1.1f);
-    __m256 vTop = _mm256_set1_ps(1.1f);
+    // 상수들을 루프 밖으로 미리 로드 (Extreme 최적화의 기본)
+    const __m256 vDt = _mm256_set1_ps(dt);
+    const __m256 vBottom = _mm256_set1_ps(-1.1f);
+    const __m256 vTop = _mm256_set1_ps(1.1f);
+    const __m256 vMulConst = _mm256_set1_ps(1.00001f);
+    const __m256 vAddSubConst = _mm256_set1_ps(0.00001f);
 
     // 8개씩 묶어서 처리 (i += 8)
     for (; i <= static_cast<int>(end) - 8; i += 8) {
@@ -125,9 +132,9 @@ void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt) {
 
         __m256 vTemp = vSpeed;
         for (int j = 0; j < 30; ++j) {
-            vTemp = _mm256_mul_ps(vTemp, _mm256_set1_ps(1.00001f));
-            vTemp = _mm256_add_ps(vTemp, _mm256_set1_ps(0.00001f));
-            vTemp = _mm256_sub_ps(vTemp, _mm256_set1_ps(0.00001f));
+            vTemp = _mm256_mul_ps(vTemp, vMulConst);
+            vTemp = _mm256_add_ps(vTemp, vAddSubConst);
+            vTemp = _mm256_sub_ps(vTemp, vAddSubConst);
         }
         vSpeed = vTemp; // 계산된 결과 반영
 
@@ -169,17 +176,26 @@ void Application::Run() {
 }
 
 void Application::Update() {
+    // 시간 관리 및 델타 타임 계산
+    static uint64_t frameCounter = 0;
+    static double elapsedSeconds = 0.0;
+    static auto t0 = std::chrono::high_resolution_clock::now();
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<float> deltaTime = t1 - t0;
+    t0 = t1;
+    float dt = deltaTime.count();
+
     // 1. ImGui 프레임 시작 및 UI 렌더링 (성능 지표 표시)
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
     ImGui::Begin("Simulation Settings");
-    ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
 
-    // 이전 프레임에서 측정된 수치 표시
-    ImGui::Text("Physics Logic (CPU+SIMD): %.4f ms", m_physicsLogicTimeMS);
-    ImGui::Text("GPU Data Copy (memcpy): %.4f ms", m_gpuCopyTimeMS);
+    // [그룹 1: 핵심 요약 지표]
+    ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+    ImGui::Text("CPU Frame(Total): %.4f ms", m_physicsLogicTimeMS + m_renderTimeMS);
 
     // 병목 판단 가이드 (체크포인트)
     if (m_physicsLogicTimeMS + m_gpuCopyTimeMS < 1.0f) {
@@ -189,26 +205,88 @@ void Application::Update() {
         ImGui::TextColored(ImVec4(1, 1, 0, 1), "Status: CPU/Bus Load detected");
     }
 
+    // --- 성능 그래프 섹션 추가 ---
+    ImGui::Separator();
+
+    // 1. 데이터 샘플링 및 그래프 업데이트 (속도 조절)
+    m_graphTimer += dt;
+    if (m_graphTimer >= m_graphUpdateInterval) {
+        float totalCPU = m_physicsLogicTimeMS + m_renderTimeMS;
+
+        m_physicsHistory[m_sampleOffset] = m_physicsLogicTimeMS;
+        m_renderHistory[m_sampleOffset] = m_renderTimeMS;
+        m_totalHistory[m_sampleOffset] = totalCPU;
+
+        m_sampleOffset = (m_sampleOffset + 1) % MAX_SAMPLES;
+        m_graphTimer = 0.0f;
+    }
+
+    // 2. 개별 그래프 출력 (다이나믹 스케일링 적용)
+    auto DrawPerformanceGraph = [&](const char* label, float* data, ImVec4 color) {
+        float maxVal = 0.0f;
+        float avgVal = 0.0f;
+        for (int i = 0; i < MAX_SAMPLES; i++) {
+            if (data[i] > maxVal) maxVal = data[i];
+            avgVal += data[i];
+        }
+        avgVal /= (float)MAX_SAMPLES;
+
+        // 다이나믹 스케일링: 최댓값의 1.2배로 천장 설정 (최소 1ms 보장)
+        float dynamicMax = (maxVal < 1.0f) ? 1.0f : maxVal * 1.2f;
+
+        char overlay[64];
+        sprintf_s(overlay, "Avg: %.3f ms", avgVal);
+
+        ImGui::PushStyleColor(ImGuiCol_PlotLines, color);
+        ImGui::PlotLines(label, data, MAX_SAMPLES, m_sampleOffset, overlay, 0.0f, dynamicMax, ImVec2(0, 60));
+        ImGui::PopStyleColor();
+        };
+
+    // [그룹 2: 시각적 추이 분석]
+    ImGui::Text("Detailed CPU Profiling");
+
+    // Total Frame Graph (Yellow)
+    DrawPerformanceGraph("Total CPU", m_totalHistory, ImVec4(1.0f, 1.0f, 0.0f, 1.0f));
+
+    // Physics Logic Graph (Cyan)
+    DrawPerformanceGraph("Simulation", m_physicsHistory, ImVec4(0.0f, 1.0f, 1.0f, 1.0f));
+
+    // Render Recording Graph (Magenta)
+    DrawPerformanceGraph("Rendering", m_renderHistory, ImVec4(1.0f, 0.0f, 1.0f, 1.0f));
+
+    ImGui::Separator();
+
+    // [그룹 3: 세부 수치 텍스트]
+    ImGui::Text("Raw Measurements:");
+    ImGui::BulletText("Simulation: %.4f ms", m_physicsLogicTimeMS);
+    ImGui::BulletText("Rendering: %.4f ms", m_renderTimeMS);
+    ImGui::BulletText("GPU Copy: %.4f ms", m_gpuCopyTimeMS);
+
+    ImGui::Separator();
+
+    // [그룹 4: 컨트롤 및 최적화 설정]
+    ImGui::Text("Optimization & Controls");
+
+    // 연산 쪽 옵션
+    ImGui::Checkbox("Multi-threaded Simulation (SIMD)", &m_multiThreadPhysics);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Distribute AVX-256 Physics calculations across worker threads.");
+
+    // 렌더 쪽 옵션
+    ImGui::Checkbox("Multi-threaded Rendering", &m_multiThreadRender);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Record DX12 command lists in parallel using Job System.");
+
     ImGui::SliderInt("Instance Count", &m_uiInstanceCount, 1, 10000000);
+
+    ImGui::Separator();
 
     bool vsync = m_renderDevice.IsVSyncEnabled();
     if (ImGui::Checkbox("Enable VSync", &vsync)) {
         m_renderDevice.SetVSync(vsync);
     }
 
-    ImGui::Checkbox("Enable Multi-Thread", &m_multiThread);
-
     ImGui::End();
-
-    // 2. 시간 관리 및 델타 타임 계산
-    static uint64_t frameCounter = 0;
-    static double elapsedSeconds = 0.0;
-    static auto t0 = std::chrono::high_resolution_clock::now();
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<float> deltaTime = t1 - t0;
-    t0 = t1;
-    float dt = deltaTime.count();
 
     // 초당 FPS 로그 출력
     frameCounter++;
@@ -230,24 +308,22 @@ void Application::Update() {
     auto physicsStart = std::chrono::high_resolution_clock::now();
 
     const uint32_t MIN_INSTANCES_FOR_THREADS = 1000;
-    if (m_instanceCount < MIN_INSTANCES_FOR_THREADS || !m_multiThread) {
+    if (m_instanceCount < MIN_INSTANCES_FOR_THREADS || !m_multiThreadPhysics) {
         // 메인 스레드에서 즉시 처리
         ExecutePhysicsSIMD(0, m_instanceCount, dt);
-        
+
     }
     else {
         // 잡 시스템을 이용한 병렬 처리
-        
         // SIMD(AVX-256) 정렬 조건을 충족하기 위해 8의 배수인 4096을 청크 크기로 설정
         // 이를 통해 모든 잡의 시작 주소가 32바이트 정렬됨을 보장함
         const uint32_t CHUNK_SIZE = 4096;
         uint32_t totalJobs = (m_instanceCount + CHUNK_SIZE - 1) / CHUNK_SIZE;
-        //jobsCounter.store(totalJobs);
-        std::atomic<int> jobsCounter(totalJobs);
+        jobsCounter.store(totalJobs);
 
         for (uint32_t t = 0; t < totalJobs; ++t) {
             uint32_t start = t * CHUNK_SIZE;
-            uint32_t end   = std::min(start + CHUNK_SIZE, m_instanceCount);
+            uint32_t end = std::min(start + CHUNK_SIZE, m_instanceCount);
 
             JobSystem::Job physicsJob;
             physicsJob.task = [this, start, end, dt]() {
@@ -286,9 +362,14 @@ void Application::Update() {
 }
 
 void Application::Render() {
+    // --- 렌더링 기록 시간 측정 시작 ---
+    auto renderStart = std::chrono::high_resolution_clock::now();
+
     UINT frameIndex = m_renderDevice.GetCurrentBackBufferIndex();
     auto rtv = m_renderDevice.GetRTVHandle(frameIndex);
     auto backBuffer = m_renderDevice.GetBackBuffer(frameIndex);
+
+    uint32_t submitCount = 0; // 실제 제출할 리스트 개수 카운트
 
     m_commandQueue.WaitForFenceValue(m_commandQueue.GetFrameFenceValue(frameIndex));
 
@@ -305,8 +386,11 @@ void Application::Render() {
     preList->ClearRenderTargetView(rtv, clearColor, 0, nullptr);
     preList->Close();
 
+    m_submitLists[submitCount++] = preList; // Clear 먼저
+
     // 2. [Workers] 스레드 풀을 이용한 병렬 기록
-    RECT rect; GetClientRect(m_window.GetHWND(), &rect);
+    RECT rect; 
+    GetClientRect(m_window.GetHWND(), &rect);
     CD3DX12_VIEWPORT vp(0.0f, 0.0f, (float)rect.right, (float)rect.bottom);
     CD3DX12_RECT sc(0, 0, rect.right, rect.bottom);
 
@@ -319,61 +403,95 @@ void Application::Render() {
     m_instancePosYView.StrideInBytes = sizeof(float);
     m_instancePosYView.SizeInBytes = m_instanceCount * sizeof(float);
 
-    // [수정] 원자적 카운터를 사용하여 모든 워커의 종료를 기다림
-    std::atomic<int> renderCounter(0);
-    std::vector<ID3D12CommandList*> workerLists(NUM_THREADS, nullptr);
+    std::fill(m_workerLists.begin(), m_workerLists.end(), nullptr);
 
-    for (uint32_t t = 0; t < NUM_THREADS; ++t) {
-        uint32_t start = t * m_instancesPerThread;
-        uint32_t end = (t == NUM_THREADS - 1) ? m_instanceCount : (t + 1) * m_instancesPerThread;
-        uint32_t countToDraw = (end > start) ? (end - start) : 0;
+    if (!m_multiThreadRender) {
+        auto& worker = m_workers[0];
+        auto alloc = worker.commandAllocators[frameIndex].Get();
+        auto list = worker.commandList.Get();
 
-        if (countToDraw == 0) continue;
+        alloc->Reset();
+        list->Reset(alloc, m_pipelineState.Get());
 
-        renderCounter.fetch_add(1);
+        list->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+        list->RSSetViewports(1, &vp);
+        list->RSSetScissorRects(1, &sc);
+        list->SetGraphicsRootSignature(m_rootSignature.Get());
+        list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        JobSystem::Job renderJob;
-        renderJob.task = [this, t, frameIndex, rtv, vp, sc, start, countToDraw, &workerLists]() {
-            auto& worker = m_workers[t];
-            auto alloc = worker.commandAllocators[frameIndex].Get();
-            auto list = worker.commandList.Get();
+        D3D12_VERTEX_BUFFER_VIEW vbvs[] = { m_positionBufferView, m_instancePosXView, m_instancePosYView, m_instanceColorView };
+        list->IASetVertexBuffers(0, 4, vbvs);
 
-            alloc->Reset();
-            list->Reset(alloc, m_pipelineState.Get());
+        list->DrawInstanced(3, m_instanceCount, 0, 0);
 
-            list->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
-            list->RSSetViewports(1, &vp);
-            list->RSSetScissorRects(1, &sc);
-            list->SetGraphicsRootSignature(m_rootSignature.Get());
-            list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        list->Close();
 
-            D3D12_VERTEX_BUFFER_VIEW vbvs[] = { m_positionBufferView, m_instancePosXView, m_instancePosYView, m_instanceColorView };
-            list->IASetVertexBuffers(0, 4, vbvs);
+        m_workerLists[0] = list; // 결과 저장
 
-            list->DrawInstanced(3, countToDraw, 0, start);
-            list->Close();
-
-            workerLists[t] = list; // 결과 저장
-            };
-        renderJob.counter = &renderCounter;
-
-        m_jobSystem.Execute(std::move(renderJob));
+        if (m_workerLists[0] != nullptr) {
+            m_submitLists[submitCount++] = m_workerLists[0];
+        }
     }
+    else {
+        // [수정] 원자적 카운터를 사용하여 모든 워커의 종료를 기다림
+        std::atomic<int> renderCounter(0);
 
-    // 메인 스레드도 대기하면서 일을 도움 (이게 하얀 화면을 해결하는 핵심)
-    m_jobSystem.Wait(renderCounter);
+        for (uint32_t t = 0; t < NUM_THREADS; ++t) {
+            uint32_t start = t * m_instancesPerThread;
+            uint32_t end = (t == NUM_THREADS - 1) ? m_instanceCount : (t + 1) * m_instancesPerThread;
+            uint32_t countToDraw = (end > start) ? (end - start) : 0;
+
+            if (countToDraw == 0) continue;
+
+            renderCounter.fetch_add(1);
+
+            JobSystem::Job renderJob;
+            renderJob.task = [this, t, frameIndex, rtv, vp, sc, start, end, countToDraw]() {
+                auto& worker = m_workers[t];
+                auto alloc = worker.commandAllocators[frameIndex].Get();
+                auto list = worker.commandList.Get();
+
+                alloc->Reset();
+                list->Reset(alloc, m_pipelineState.Get());
+
+                list->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+                list->RSSetViewports(1, &vp);
+                list->RSSetScissorRects(1, &sc);
+                list->SetGraphicsRootSignature(m_rootSignature.Get());
+                list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+                D3D12_VERTEX_BUFFER_VIEW vbvs[] = { m_positionBufferView, m_instancePosXView, m_instancePosYView, m_instanceColorView };
+                list->IASetVertexBuffers(0, 4, vbvs);
+
+                list->DrawInstanced(3, countToDraw, 0, start);
+
+                list->Close();
+
+                m_workerLists[t] = list; // 결과 저장
+                };
+            renderJob.counter = &renderCounter;
+
+            m_jobSystem.Execute(std::move(renderJob));
+        }
+
+        // 메인 스레드도 대기하면서 일을 도움 (이게 하얀 화면을 해결하는 핵심)
+        m_jobSystem.Wait(renderCounter);
+
+        // 6개 스레드 명령 리스트들을 한꺼번에 복사
+        for (uint32_t i = 0; i < NUM_THREADS; ++i) {
+            if (m_workerLists[i]) m_submitLists[submitCount++] = m_workerLists[i];
+        }
+    }
 
     // 3. [Main] 수집 및 후처리
-    std::vector<ID3D12CommandList*> submitLists;
-    submitLists.push_back(preList); // Clear 먼저
-    for (auto list : workerLists) {
-        if (list) submitLists.push_back(list);
-    }
+    // m_submitLists 는 덮어쓰기 함으로 초기화 불필요. 
+    // m_workerLists 는 nullptr가 아닐 시 for-range 루프가 
+    // 실제 리스트 개수보다 많이 반복되기에 초기화 필수.
 
     // 후처리 리스트: Barrier (RT -> Present)
     auto postList = m_mainPost.commandList.Get();
     auto postAlloc = m_mainPost.commandAllocators[frameIndex].Get();
-
+    
     // 2. 리셋 (워커 리스트들과 마찬가지로 리셋 필요)
     postAlloc->Reset();
     postList->Reset(postAlloc, nullptr);
@@ -398,10 +516,15 @@ void Application::Render() {
     postList->Close();
 
     // 5. 제출 배열의 가장 마지막에 추가
-    submitLists.push_back(postList);
+    // ! 리스트를 닫아야 추가 가능. "명령서 봉인" ! 
+    m_submitLists[submitCount++] = postList;
+
+    // --- 렌더링 기록 시간 측정 종료 ---
+    auto renderEnd = std::chrono::high_resolution_clock::now();
+    m_renderTimeMS = std::chrono::duration<float, std::milli>(renderEnd - renderStart).count();
 
     // 4. 실행
-    m_commandQueue.GetQueue()->ExecuteCommandLists((UINT)submitLists.size(), submitLists.data());
+    m_commandQueue.GetQueue()->ExecuteCommandLists(submitCount, m_submitLists.data());
 
     uint64_t fenceValue = m_commandQueue.Signal();
     m_commandQueue.SetFrameFenceValue(frameIndex, fenceValue);
