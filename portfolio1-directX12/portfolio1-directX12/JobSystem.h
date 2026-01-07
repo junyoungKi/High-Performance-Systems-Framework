@@ -42,10 +42,6 @@ struct SpinlockGuard {
     ~SpinlockGuard() { spin.unlock(); }
 };
 
-
-
-
-
 class JobSystem {
 public:
     struct Job {
