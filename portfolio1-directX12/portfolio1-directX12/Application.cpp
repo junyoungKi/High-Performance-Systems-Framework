@@ -148,6 +148,10 @@ void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt) {
         vPosY = _mm256_blendv_ps(vPosY, vTop, vMask);
 
         // 4. 결과 저장
+        // _mm256_store_ps 의 경우, 데이터를 캐시에 채우기에 당장에 필요한
+        // 다른 데이터들이 캐시로부터 쫓겨나는 문제가 생김. 
+        // 이를 방지하고자 _mm256_stream_ps를 사용하여 데이터를 메인 메모리에
+        // 채움으로서 당장 사용하지 않을 Y좌표값에 대한 데이터를 효율적으로 관리
         _mm256_stream_ps(&m_instancePosY[i], vPosY);
     }
 
