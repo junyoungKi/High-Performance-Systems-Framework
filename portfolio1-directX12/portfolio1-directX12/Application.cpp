@@ -163,6 +163,7 @@ void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt, std
     for (; i < static_cast<int>(end); ++i) {
         m_instancePosY[i] -= m_instanceSpeeds[i] * dt;
         if (m_instancePosY[i] < -1.1f) m_instancePosY[i] = 1.1f;
+        outputBuffer[i] = m_instancePosY[i];
     }
     // --- SIMD Á¾·á ---
 }
