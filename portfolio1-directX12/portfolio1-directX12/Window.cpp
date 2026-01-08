@@ -20,9 +20,9 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     if (app) {
         switch (msg) {
         case WM_PAINT: 
-            app->Update(); 
-            app->Render(); 
-            //app->Run();
+            // 1. 여기서 Update/Render를 호출하지 않습니다.
+            // 2. 대신 아래 함수를 통해 "다 그렸다"고 OS를 안심시킵니다.
+            ValidateRect(hwnd, NULL);
             return 0;
 
         case WM_SIZE:

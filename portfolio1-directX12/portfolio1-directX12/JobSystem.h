@@ -106,12 +106,14 @@ public:
 
 private:
 
+    uint32_t spinCount = 0;
+
     uint32_t m_threadCount;
     std::vector<std::thread> m_threads;
     std::vector<std::unique_ptr<WorkerQueue>> m_workerQueues; // 각 스레드별 로컬 큐
     std::atomic<bool> m_stop;
     std::atomic<uint32_t> m_nextQueue; // 작업을 골고루 분산하기 위한 인덱스
 
-    //std::mutex m_wakeMutex;
-    //std::condition_variable m_wakeCondition;
+    std::mutex m_wakeMutex;
+    std::condition_variable m_wakeCondition;
 };

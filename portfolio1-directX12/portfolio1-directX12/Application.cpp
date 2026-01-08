@@ -111,7 +111,10 @@ Application::~Application() {/*
 //    }
 //}
 
-void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt) {
+void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt, std::span<float> outputBuffer) {
+   
+    assert(end <= outputBuffer.size());
+    
     // --- SIMD (SSE) 시작 ---
     // --- AVX-256 ---
     int i = static_cast<int>(start);
@@ -153,6 +156,7 @@ void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt) {
         // 이를 방지하고자 _mm256_stream_ps를 사용하여 데이터를 메인 메모리에
         // 채움으로서 당장 사용하지 않을 Y좌표값에 대한 데이터를 효율적으로 관리
         _mm256_stream_ps(&m_instancePosY[i], vPosY);
+        _mm256_stream_ps(&outputBuffer[i], vPosY);
     }
 
     // 남은 자투리 데이터 처리 (최대 7개)
@@ -189,6 +193,15 @@ void Application::Update() {
     std::chrono::duration<float> deltaTime = t1 - t0;
     t0 = t1;
     float dt = deltaTime.count();
+
+    // 1. 현재 프레임 인덱스 가져오기 (0, 1, 2 중 하나)
+    UINT frameIndex = m_renderDevice.GetCurrentBackBufferIndex();
+
+    // 2. 현재 프레임 영역의 시작 주소 계산 (Ring Buffer)
+    UINT oneFrameOffset = m_maxInstanceCount * sizeof(float);
+
+    float* pDest = reinterpret_cast<float*>(static_cast<uint8_t*>(m_posYMappedPtr) +
+                                           (frameIndex * oneFrameOffset));
 
     // 1. ImGui 프레임 시작 및 UI 렌더링 (성능 지표 표시)
     ImGui_ImplDX12_NewFrame();
@@ -309,21 +322,18 @@ void Application::Update() {
     // 3. 물리 시뮬레이션 및 시간 측정 (순수 CPU+SIMD 연산 구간)
     m_instanceCount = static_cast<uint32_t>(m_uiInstanceCount);
     m_instancesPerThread = (NUM_THREADS > 0) ? m_instanceCount / NUM_THREADS : m_instanceCount;
+    std::span<float> destSpan(pDest, m_instanceCount);
 
     // --- 물리 연산 시간 측정 시작 ---
     auto physicsStart = std::chrono::high_resolution_clock::now();
 
-    const uint32_t MIN_INSTANCES_FOR_THREADS = 1000;
     if (m_instanceCount < MIN_INSTANCES_FOR_THREADS || !m_multiThreadPhysics) {
         // 메인 스레드에서 즉시 처리
-        ExecutePhysicsSIMD(0, m_instanceCount, dt);
+        ExecutePhysicsSIMD(0, m_instanceCount, dt, destSpan);
 
     }
     else {
         // 잡 시스템을 이용한 병렬 처리
-        // SIMD(AVX-256) 정렬 조건을 충족하기 위해 8의 배수인 4096을 청크 크기로 설정
-        // 이를 통해 모든 잡의 시작 주소가 32바이트 정렬됨을 보장함
-        const uint32_t CHUNK_SIZE = 4096;
         uint32_t totalJobs = (m_instanceCount + CHUNK_SIZE - 1) / CHUNK_SIZE;
         jobsCounter.store(totalJobs);
 
@@ -332,8 +342,8 @@ void Application::Update() {
             uint32_t end = std::min(start + CHUNK_SIZE, m_instanceCount);
 
             JobSystem::Job physicsJob;
-            physicsJob.task = [this, start, end, dt]() {
-                this->ExecutePhysicsSIMD(start, end, dt);
+            physicsJob.task = [this, start, end, dt, destSpan]() {
+                this->ExecutePhysicsSIMD(start, end, dt, destSpan);
                 };
             physicsJob.counter = &jobsCounter;
 
@@ -351,16 +361,6 @@ void Application::Update() {
     // 4. GPU 데이터 복사 및 시간 측정 (PCI-e 대역폭 사용 구간)
     // --- GPU 데이터 복사 시간 측정 시작 ---
     auto copyStart = std::chrono::high_resolution_clock::now();
-
-    // 1. 현재 프레임 인덱스 가져오기 (0, 1, 2 중 하나)
-    UINT frameIndex = m_renderDevice.GetCurrentBackBufferIndex();
-
-    // 2. 현재 프레임 영역의 시작 주소 계산 (Ring Buffer)
-    UINT oneFrameOffset = m_maxInstanceCount * sizeof(float);
-    uint8_t* pDest = static_cast<uint8_t*>(m_posYMappedPtr) + (frameIndex * oneFrameOffset);
-
-    // 3. 데이터 복사 (Persistent Mapping된 공간에 memcpy)
-    memcpy(pDest, m_instancePosY.data(), m_instanceCount * sizeof(float));
 
     auto copyEnd = std::chrono::high_resolution_clock::now();
     m_gpuCopyTimeMS = std::chrono::duration<float, std::milli>(copyEnd - copyStart).count();
@@ -441,9 +441,7 @@ void Application::Render() {
         }
     }
     else {
-        // [수정] 원자적 카운터를 사용하여 모든 워커의 종료를 기다림
-        std::atomic<int> renderCounter(0);
-
+        
         for (uint32_t t = 0; t < NUM_THREADS; ++t) {
             uint32_t start = t * m_instancesPerThread;
             uint32_t end = (t == NUM_THREADS - 1) ? m_instanceCount : (t + 1) * m_instancesPerThread;

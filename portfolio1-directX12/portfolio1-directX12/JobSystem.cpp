@@ -22,7 +22,7 @@ void JobSystem::Execute(Job job) {
     // 라운드 로빈 방식으로 큐에 분산
     uint32_t index = m_nextQueue.fetch_add(1, std::memory_order_relaxed) % m_threadCount;
     m_workerQueues[index]->Push(std::move(job));
-    //m_wakeCondition.notify_all(); // [수정] 잡이 들어왔으니 즉시 깨움
+    m_wakeCondition.notify_all(); // [수정] 잡이 들어왔으니 즉시 깨움
 }
 
 void JobSystem::Wait(std::atomic<int>& counter) {
@@ -39,14 +39,13 @@ void JobSystem::Wait(std::atomic<int>& counter) {
             if (job->counter) job->counter->fetch_sub(1, std::memory_order_release);
         }
         else {
-            std::this_thread::yield();
+            //std::this_thread::yield();
+            _mm_pause();
         }
     }
 }
 
 void JobSystem::WorkerThreadLoop(uint32_t threadIndex) {
-
-    uint32_t failCount = 0; // 실패 횟수 카운트
 
     while (!m_stop) {
         std::optional<Job> job = m_workerQueues[threadIndex]->Pop();
@@ -62,25 +61,26 @@ void JobSystem::WorkerThreadLoop(uint32_t threadIndex) {
             job->task();
             if (job->counter) 
                 job->counter->fetch_sub(1, std::memory_order_release);
-
-            // [추가] 작업을 수행했으므로 실패 카운트를 리셋합니다!
-            //failCount = 0;
         }
         else {
-            //m_idleCount++; // 일을 못 찾았을 때만 증가
-            //std::this_thread::yield();
-            // --- 지수적 백오프 전략 ---
-            failCount++;
-            if (failCount < 1000) {
-                _mm_pause(); // 아주 잠깐 스핀 (캐시 성능 유지)
-            }
-            else if (failCount < 5000) {
-                std::this_thread::yield(); // 타임 슬라이스 양보
-            }
-            else {
-                // 정말 일이 없으면 1ms 정도 재워서 CPU를 완전히 쉬게 함
-                std::this_thread::sleep_for(std::chrono::microseconds(100));
-            }
+            ////m_idleCount++; // 일을 못 찾았을 때만 증가
+            ////std::this_thread::yield();
+            //// --- 지수적 백오프 전략 ---
+            //failCount++;
+            //if (failCount < 1000) {
+            //    _mm_pause(); // 아주 잠깐 스핀 (캐시 성능 유지)
+            //}
+            //else if (failCount < 5000) {
+            //    std::this_thread::yield(); // 타임 슬라이스 양보
+            //}
+            //else {
+            //    // 정말 일이 없으면 1ms 정도 재워서 CPU를 완전히 쉬게 함
+            //    std::this_thread::sleep_for(std::chrono::microseconds(100));
+            //}
+            // [권장] 단순 수치 기반 백오프 대신 조건 변수 대기 사용
+            std::unique_lock<std::mutex> lock(m_wakeMutex);
+            m_wakeCondition.wait_for(lock, std::chrono::milliseconds(1));
+            // 1ms 동안 대기하다 깨어나거나, notify_all()에 의해 즉시 깨어납니다.
         }
     }
 }

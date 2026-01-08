@@ -10,7 +10,7 @@
 #include <immintrin.h>
 #include <malloc.h>
 #include <new>
-
+#include <span>
 
 template <typename T, std::size_t Alignment>
 struct AlignedAllocator {
@@ -59,7 +59,7 @@ public:
 
     bool CreateWorkerResources();
 
-    void ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt);
+    void ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt, std::span<float> outputBuffer);
 
     bool InitImGui();
 
@@ -93,8 +93,14 @@ private:
     // 간단한 스레드 풀 구현, RAII 패턴 유지
     using float32_vec = std::vector<float, AlignedAllocator<float, 32>>;
 
+    // SIMD(AVX-256) 정렬 조건을 충족하기 위해 8의 배수인 4096을 청크 크기로 설정
+    // 이를 통해 모든 잡의 시작 주소가 32바이트 정렬됨을 보장함
+    const uint32_t CHUNK_SIZE = 4096;
+
     JobSystem m_jobSystem;
     std::atomic<int> jobsCounter;
+    // [수정] 원자적 카운터를 사용하여 모든 워커의 종료를 기다림
+    std::atomic<int> renderCounter;
 
     bool m_multiThreadPhysics = false;
     bool m_multiThreadRender = false;
@@ -145,6 +151,7 @@ private:
     uint32_t NUM_THREADS; // 사용할 스레드 개수
     ThreadWorker m_mainPre;
     ThreadWorker m_mainPost;
+    const uint32_t MIN_INSTANCES_FOR_THREADS = 1000;
 
     //// 고정 배열 대신 vector를 사용합니다.
     std::vector<ThreadWorker> m_workers;
