@@ -8,6 +8,8 @@
 #include <immintrin.h>
 #include <memory>
 #include <new>
+#include <mutex>
+#include <condition_variable>
 
 // 캐시라인 크기 호환성 처리
 #ifdef __cpp_lib_hardware_interference_size
@@ -61,7 +63,7 @@ private:
     struct alignas(std::hardware_destructive_interference_size) WorkerQueue {
         
         std::deque<Job> queue;
-        Spinlock spin; // std::mutex 제거
+        Spinlock spin; 
 
         void Push(Job job) {
             SpinlockGuard lock(spin);
@@ -96,17 +98,20 @@ public:
 
     // 특정 카운터가 0이 될 때까지 현재 스레드도 일을 도우며 대기
     void Wait(std::atomic<int>& counter);
+    void WorkerThreadLoop(uint32_t threadIndex);
 
     uint32_t GetThreadCount() const { return m_threadCount; }
-    uint32_t m_idleCount = 0; // 이 스레드가 일을 못 찾은 횟수
+
+    //uint32_t m_idleCount = 0; // 이 스레드가 일을 못 찾은 횟수
 
 private:
-
-    void WorkerThreadLoop(uint32_t threadIndex);
 
     uint32_t m_threadCount;
     std::vector<std::thread> m_threads;
     std::vector<std::unique_ptr<WorkerQueue>> m_workerQueues; // 각 스레드별 로컬 큐
     std::atomic<bool> m_stop;
     std::atomic<uint32_t> m_nextQueue; // 작업을 골고루 분산하기 위한 인덱스
+
+    //std::mutex m_wakeMutex;
+    //std::condition_variable m_wakeCondition;
 };

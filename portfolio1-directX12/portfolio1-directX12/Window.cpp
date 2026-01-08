@@ -22,6 +22,7 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         case WM_PAINT: 
             app->Update(); 
             app->Render(); 
+            //app->Run();
             return 0;
 
         case WM_SIZE:

@@ -290,7 +290,7 @@ void Application::Update() {
         m_renderDevice.SetVSync(vsync);
     }
 
-    ImGui::Text("Idle Threads: %d", m_jobSystem.m_idleCount);
+    //ImGui::Text("Idle Threads: %d", m_jobSystem.m_idleCount);
 
     ImGui::End();
 
@@ -368,8 +368,7 @@ void Application::Update() {
 }
 
 void Application::Render() {
-    // --- 렌더링 기록 시간 측정 시작 ---
-    auto renderStart = std::chrono::high_resolution_clock::now();
+    
 
     UINT frameIndex = m_renderDevice.GetCurrentBackBufferIndex();
     auto rtv = m_renderDevice.GetRTVHandle(frameIndex);
@@ -378,6 +377,9 @@ void Application::Render() {
     uint32_t submitCount = 0; // 실제 제출할 리스트 개수 카운트
 
     m_commandQueue.WaitForFenceValue(m_commandQueue.GetFrameFenceValue(frameIndex));
+
+    // --- 렌더링 기록 시간 측정 시작 ---
+    auto renderStart = std::chrono::high_resolution_clock::now();
 
     // 1. [Main] 전처리: Barrier (Present -> RT) 및 Clear
     auto preList = m_mainPre.commandList.Get();
