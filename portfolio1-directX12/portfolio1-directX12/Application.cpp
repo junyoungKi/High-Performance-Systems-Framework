@@ -156,6 +156,9 @@ void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt, std
         // 이를 방지하고자 _mm256_stream_ps를 사용하여 데이터를 메인 메모리에
         // 채움으로서 당장 사용하지 않을 Y좌표값에 대한 데이터를 효율적으로 관리
         _mm256_stream_ps(&m_instancePosY[i], vPosY);
+
+        // 기존 memcpy 대신 자체적으로 아웃풋 버퍼에 y값을 저장함으로서 
+        // gpu로의 데이터 복사 시간을 절약
         _mm256_stream_ps(&outputBuffer[i], vPosY);
     }
 
