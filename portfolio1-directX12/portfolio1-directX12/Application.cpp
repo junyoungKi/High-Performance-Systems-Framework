@@ -18,7 +18,7 @@ bool Application::Initialize(HINSTANCE hInstance, int width, int height) {
     if (!m_window.Create(hInstance, L"DX12WindowClass", L"DX12 Engine Renderer", width, height, this))
         return false;
 
-    auto adapter = m_renderDevice.GetAdapter(false);
+    auto adapter = m_renderDevice.GetAdapter(false); 
     auto device = m_renderDevice.CreateDevice(adapter);
 
     if (!m_commandQueue.Initialize(device))
@@ -137,7 +137,7 @@ void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt, std
         __m256 vTemp = vSpeed;
 
         // CPU 부하를 통해 성능 측정
-        for (int j = 0; j < 60; ++j) {
+        for (int j = 0; j < 50; ++j) {
             vTemp = _mm256_mul_ps(vTemp, vMulConst);
             vTemp = _mm256_add_ps(vTemp, vAddSubConst);
             vTemp = _mm256_sub_ps(vTemp, vAddSubConst);

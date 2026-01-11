@@ -41,8 +41,6 @@ struct ThreadWorker {
     ComPtr<ID3D12GraphicsCommandList> commandList;
 };
 
-struct Position { float x, y; };
-
 class Application {
 public:
     bool Initialize(HINSTANCE hInstance, int width, int height);
