@@ -134,7 +134,9 @@ void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt, std
         __m256 vSpeed = _mm256_load_ps(&m_instanceSpeeds[i]);
 
         __m256 vTemp = vSpeed;
-        for (int j = 0; j < 30; ++j) {
+
+        // CPU 부하를 통해 성능 측정
+        for (int j = 0; j < 60; ++j) {
             vTemp = _mm256_mul_ps(vTemp, vMulConst);
             vTemp = _mm256_add_ps(vTemp, vAddSubConst);
             vTemp = _mm256_sub_ps(vTemp, vAddSubConst);
