@@ -29,7 +29,7 @@ private:
 
 public:
     void lock() {
-        // 락을 얻을 때까지 계속 확인 (Busy-waiting)
+        // 락을 얻을 때까지 계속 확인 (Busy-waiting) 
         while (flag.test_and_set(std::memory_order_acquire)) {
             // CPU에게 현재 스핀 루프 중임을 알려 파이프라인 성능 저하 및 전력 소모 방지
             _mm_pause();

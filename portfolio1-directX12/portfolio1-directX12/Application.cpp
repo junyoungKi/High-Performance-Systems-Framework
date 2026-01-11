@@ -9,7 +9,7 @@ bool Application::Initialize(HINSTANCE hInstance, int width, int height) {
     //uint32_t cores = std::thread::hardware_concurrency();
     NUM_THREADS = m_jobSystem.GetThreadCount();
     // 2. 워커 자원 배열(vector) 크기 설정
-    m_workers.resize(NUM_THREADS);
+    m_workers.resize(NUM_THREADS); //스레드풀
     m_workerLists.resize(NUM_THREADS);
 
     // [수정] preList(+1)와 postList(+1) 공간을 포함해 +2를 해줘야 합니다.
@@ -118,6 +118,7 @@ void Application::ExecutePhysicsSIMD(uint32_t start, uint32_t end, float dt, std
     // --- SIMD (SSE) 시작 ---
     // --- AVX-256 ---
     int i = static_cast<int>(start);
+
 
     // 8개 슬롯(256비트)에 동일한 값 채우기
     // 상수들을 루프 밖으로 미리 로드 (Extreme 최적화의 기본)
@@ -333,7 +334,7 @@ void Application::Update() {
     // --- 물리 연산 시간 측정 시작 ---
     auto physicsStart = std::chrono::high_resolution_clock::now();
 
-    if (m_instanceCount < MIN_INSTANCES_FOR_THREADS || !m_multiThreadPhysics) {
+    if (m_instanceCount < MIN_INSTANCES_FOR_THREADS || !m_multiThreadPhysics) {  
         // 메인 스레드에서 즉시 처리
         ExecutePhysicsSIMD(0, m_instanceCount, dt, destSpan);
 
@@ -648,7 +649,7 @@ bool Application::CreateShadersAndPSO() {
 
     return true;
 }
-
+// + 시스템이랑 엔진은 c++ 소프트웨어 엔지니어랑 엮어서 갈 수도 있는 반면 그래픽스는 시발 ㄹㅇ 그래픽스 하나만 보고가야함
 bool Application::CreateVertexBuffers() {
     auto device = m_renderDevice.GetDevice();
     auto commandList = m_commandQueue.GetCommandList();
@@ -663,6 +664,7 @@ bool Application::CreateVertexBuffers() {
         { -0.01125f, -0.01464f }     // 왼쪽 아래 (-0.05625f -> -0.01125f)
     };
 
+    //메모리 풀 
     m_instancePosX.resize(m_maxInstanceCount);
     m_instancePosY.resize(m_maxInstanceCount);
     m_instanceColors.resize(m_maxInstanceCount);

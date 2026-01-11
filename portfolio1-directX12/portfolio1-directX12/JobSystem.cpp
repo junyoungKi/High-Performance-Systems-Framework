@@ -62,9 +62,10 @@ void JobSystem::WorkerThreadLoop(uint32_t threadIndex) {
             if (job->counter) 
                 job->counter->fetch_sub(1, std::memory_order_release);
         }
+        
         else {
             ////m_idleCount++; // 일을 못 찾았을 때만 증가
-            ////std::this_thread::yield();
+            ////std::this_thread::yield(); 
             //// --- 지수적 백오프 전략 ---
             //failCount++;
             //if (failCount < 1000) {
@@ -78,7 +79,7 @@ void JobSystem::WorkerThreadLoop(uint32_t threadIndex) {
             //    std::this_thread::sleep_for(std::chrono::microseconds(100));
             //}
             // [권장] 단순 수치 기반 백오프 대신 조건 변수 대기 사용
-            std::unique_lock<std::mutex> lock(m_wakeMutex);
+            std::unique_lock<std::mutex> lock(m_wakeMutex); //그래서 일을 계속 못찾으면 잠재우는데 스핀락은 그딴거 못해서 뮤텍스 써야함 ㅇㅇ
             m_wakeCondition.wait_for(lock, std::chrono::milliseconds(1));
             // 1ms 동안 대기하다 깨어나거나, notify_all()에 의해 즉시 깨어납니다.
         }

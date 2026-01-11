@@ -102,7 +102,7 @@ private:
     // [수정] 원자적 카운터를 사용하여 모든 워커의 종료를 기다림
     std::atomic<int> renderCounter;
 
-    bool m_multiThreadPhysics = false;
+    bool m_multiThreadPhysics = false; 
     bool m_multiThreadRender = false;
 
     Window m_window;
@@ -129,9 +129,9 @@ private:
     uint32_t m_maxInstanceCount = 10000000;
     //std::vector<DirectX::XMFLOAT2> m_instanceOffsets;
     float32_vec                    m_instancePosX; // X는 바뀌지 않음
-    float32_vec                    m_instancePosY;   // Y 좌표 풀
+    float32_vec                    m_instancePosY;   // Y 좌표 풀   
     std::vector<DirectX::XMFLOAT3> m_instanceColors;
-    float32_vec                    m_instanceSpeeds;
+    float32_vec                    m_instanceSpeeds;  
 
     ComPtr<ID3D12Resource> m_instanceColorBuffer;
     //ComPtr<ID3D12Resource> m_instanceOffsetUploadBuffer;
