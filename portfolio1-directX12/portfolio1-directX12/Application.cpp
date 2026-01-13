@@ -656,14 +656,6 @@ bool Application::CreateVertexBuffers() {
     // 초기화 시점이므로 첫 번째 커맨드 할당자를 사용합니다.
     auto commandAllocator = m_commandQueue.GetCurrentAllocator(0);
 
-    // 1. CPU 데이터 정의 (기본 정삼각형 모양 및 인스턴스 개별 데이터)
-    // 정점의 위치 데이터 (모든 삼각형이 공유할 기본 모양)
-    m_positions = {
-        {  0.0f,      0.02f },       // 위 (0.1f -> 0.02f)
-        {  0.01125f, -0.01464f },    // 오른쪽 아래 (0.05625f -> 0.01125f)
-        { -0.01125f, -0.01464f }     // 왼쪽 아래 (-0.05625f -> -0.01125f)
-    };
-
     //메모리 풀 
     m_instancePosX.resize(m_maxInstanceCount);
     m_instancePosY.resize(m_maxInstanceCount);
@@ -683,7 +675,7 @@ bool Application::CreateVertexBuffers() {
         m_instanceSpeeds[i] = 0.2f + (static_cast<float>(rand() % 50) / 100.0f);
     }
 
-    const UINT posSize = static_cast<UINT>(m_positions.size() * sizeof(Position));
+    const UINT posSize = static_cast<UINT>(m_triangle.size() * sizeof(Position));
     const UINT XoffSize = static_cast<UINT>(m_instancePosX.size() * sizeof(float));
     const UINT YoffSize = static_cast<UINT>(m_instancePosY.size() * sizeof(float));
     const UINT instColSize = static_cast<UINT>(m_instanceColors.size() * sizeof(DirectX::XMFLOAT3));
@@ -733,7 +725,7 @@ bool Application::CreateVertexBuffers() {
     // 4. CPU 데이터를 임시 Upload 버퍼로 복사 (Map/Unmap)
     void* pData = nullptr;
     posUpload->Map(0, nullptr, &pData);
-    memcpy(pData, m_positions.data(), posSize);
+    memcpy(pData, m_triangle.data(), posSize);
     posUpload->Unmap(0, nullptr);
 
     xUpload->Map(0, nullptr, &pData);

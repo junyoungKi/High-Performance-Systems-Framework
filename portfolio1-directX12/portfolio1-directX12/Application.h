@@ -11,6 +11,7 @@
 #include <malloc.h>
 #include <new>
 #include <span>
+#include <array>
 
 template <typename T, std::size_t Alignment>
 struct AlignedAllocator {
@@ -111,7 +112,16 @@ private:
     bool m_IsInitialized = false;
 
     ComPtr<ID3D12RootSignature> m_rootSignature;
-    std::vector<Position> m_positions;
+
+    // 1. CPU 데이터 정의 (기본 정삼각형 모양 및 인스턴스 개별 데이터)
+    // 정점의 위치 데이터 (모든 삼각형이 공유할 기본 모양)
+    // 불면하는 값이니 컴파일 타임에 결정하는 constexpr 선언
+    static constexpr std::array<Position, 3> 
+                        m_triangle = { {
+                            {  0.0f,      0.02f },       // 위 (0.1f -> 0.02f)
+                            {  0.01125f, -0.01464f },    // 오른쪽 아래 (0.05625f -> 0.01125f)
+                            { -0.01125f, -0.01464f }     // 왼쪽 아래 (-0.05625f -> -0.01125f)
+                        } };
 
     // 1. 파이프라인 상태 객체 (PSO)
     // 셰이더, 블렌딩, 래스터라이저 상태 등을 모두 담고 있는 결정적인 객체입니다.
