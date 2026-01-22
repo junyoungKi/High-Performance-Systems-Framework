@@ -57,6 +57,9 @@
     <ClCompile Include="imgui_widgets.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
+    <ClCompile Include="JobSystem.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="d3dx12.h">
@@ -110,9 +113,6 @@
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Shaders\VertexShader.hlsl">
-      <Filter>리소스 파일\Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="Shaders\PhysicsCS.hlsl">
       <Filter>리소스 파일\Shaders</Filter>
     </FxCompile>
   </ItemGroup>
