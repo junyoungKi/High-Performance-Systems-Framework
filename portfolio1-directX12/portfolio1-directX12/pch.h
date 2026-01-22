@@ -1,4 +1,9 @@
-// pch.h
+/**
+ * @file pch.h
+ * @author Junyoung Ki
+ * @brief Precompiled Header to accelerate build times.
+ */
+
 #pragma once
 
 extern bool g_UseWarp;
@@ -13,7 +18,7 @@ extern bool g_UseWarp;
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
 #include <DirectXMath.h>
-#include "d3dx12.h" // 프로젝트 내 파일이지만 거의 수정 안 하므로 포함 가능
+#include "d3dx12.h"
 
 // STL
 #include <algorithm>
@@ -23,11 +28,10 @@ extern bool g_UseWarp;
 #include <memory>
 #include <vector>
 
-// 프로젝트 전역 헬퍼
 #include "Helpers.h"
 #include "JobSystem.h"
 
-#include <future> // std::future, std::async 사용을 위해 필수
+#include <future> 
 #include <thread>
 #include <queue>
 
@@ -35,7 +39,6 @@ extern bool g_UseWarp;
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
-// 매크로 충돌 방지
 #if defined(min)
 #undef min
 #endif

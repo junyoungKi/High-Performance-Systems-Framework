@@ -1,3 +1,10 @@
+/**
+ * @file JobSystem.h
+ * @author Junyoung Ki
+ * @brief Custom Work-Stealing Job System for high-concurrency task management.
+ * @date 2026
+ */
+
 #pragma once
 #include <atomic>
 #include <optional>
@@ -11,27 +18,32 @@
 #include <mutex>
 #include <condition_variable>
 
-// 캐시라인 크기 호환성 처리
+// Handle cache line size compatibility for different hardware architectures
 #ifdef __cpp_lib_hardware_interference_size
 using std::hardware_destructive_interference_size;
 #else
 constexpr std::size_t hardware_destructive_interference_size = 64;
 #endif
 
-// [1] 커스텀 스핀락 클래스
-// 스핀락 사용 이유: WorkQueue에서 하는 작업은 단순히 큐에 작업을 넣고 빼는
-// 것으로 소요 시간이 매우 짧기(Low Latency)에 스레드를 잠재우는 것보다 바쁜 대기를 통해
-// 콘텍스트 스위칭 오버헤드를 제거함. 또한 OS의 개입 없이 스스로 깨어남
-// 단, CPU 자원 소모량이 많음으로 소요 시간이 긴 작업에는 부적절.
+/**
+ * [1] Custom Spinlock Class
+ * RATIONALE:
+ * Queue operations (push/pop) are extremely short-duration tasks (Low Latency).
+ * In such cases, busy-waiting is often more efficient than putting a thread to sleep,
+ * as it eliminates the heavy overhead of OS-level context switching.
+ * This allows the thread to resume execution immediately without OS intervention.
+ * NOTE: Consumes high CPU cycles; inappropriate for long-duration tasks.
+ */
 class Spinlock {
 private:
     std::atomic_flag flag = ATOMIC_FLAG_INIT;
 
 public:
     void lock() {
-        // 락을 얻을 때까지 계속 확인 (Busy-waiting) 
+        // Continuously poll until the lock is acquired (Busy-waiting)
         while (flag.test_and_set(std::memory_order_acquire)) {
-            // CPU에게 현재 스핀 루프 중임을 알려 파이프라인 성능 저하 및 전력 소모 방지
+            // Hint to the CPU that it is in a spin loop to optimize pipeline performance 
+            // and reduce power consumption.
             _mm_pause();
         }
     }
@@ -41,7 +53,9 @@ public:
     }
 };
 
-// [2] 안전한 락 관리를 위한 RAII Guard
+/**
+ * [2] RAII Guard for safe lock management
+ */
 struct SpinlockGuard {
     Spinlock& spin;
     SpinlockGuard(Spinlock& s) : spin(s) { spin.lock(); }
@@ -52,30 +66,33 @@ class JobSystem {
 public:
     struct Job {
         std::function<void()> task;
-        std::atomic<int>* counter = nullptr;  // 동기화 카운터
+        std::atomic<int>* counter = nullptr;  // Synchronization counter for task completion
     };
 
 private:
-    // [3] 스핀락이 적용된 WorkerQueue 
-    // alignas와 하드웨어별 캐시라인 크기 함수로 가짜 공유, 
-    // 캐시 라인 두 개에 걸쳐서 읽는(Cache Line Split) 현상을 방지
-    // 단, 호환성 문제로 64로 패딩 고정하는 것도 가능. 소폭의 cpu 병목 제거
+    /**
+     * [3] WorkerQueue with Spinlock
+     * Uses alignas with hardware-specific cache line size to prevent:
+     * - False Sharing: Multiple processors accessing different data on the same cache line.
+     * - Cache Line Splitting: Reading a single data structure across two cache lines.
+     */
     struct alignas(std::hardware_destructive_interference_size) WorkerQueue {
-        
+
         std::deque<Job> queue;
-        Spinlock spin; 
+        Spinlock spin;
 
         void Push(Job job) {
             SpinlockGuard lock(spin);
-            queue.push_back(std::move(job));  // malloc !!
+            queue.push_back(std::move(job));
         }
 
         std::optional<Job> Pop() {
             SpinlockGuard lock(spin);
             if (queue.empty()) return std::nullopt;
 
-            Job job = std::move(queue.back());  // LIFO 캐시 효율을 위해 최근 것을 먼저
-            queue.pop_back();  // malloc !!
+            // LIFO (Last-In-First-Out) for better cache locality (latest job is likely in cache)
+            Job job = std::move(queue.back());
+            queue.pop_back();
             return job;
         }
 
@@ -83,36 +100,48 @@ private:
             SpinlockGuard lock(spin);
             if (queue.empty()) return std::nullopt;
 
-            Job job = std::move(queue.front());  // FIFO 스틸은 오래된 것부터
+            // FIFO (First-In-First-Out) for stealing to grab the oldest job
+            Job job = std::move(queue.front());
             queue.pop_front();
             return job;
         }
     };
 
 public:
+    /**
+     * Constructor: Initializes worker threads and local queues.
+     */
     JobSystem(uint32_t threadCount = std::thread::hardware_concurrency());
+
+    /**
+     * Destructor: Signals threads to stop and joins them.
+     */
     ~JobSystem();
 
-    // 작업을 시스템에 등록
+    /**
+     * Registers a job into the system for execution.
+     */
     void Execute(Job job);
 
-    // 특정 카운터가 0이 될 때까지 현재 스레드도 일을 도우며 대기
+    /**
+     * Blocks until the specified counter reaches zero.
+     * The calling thread also participates in work-stealing to assist completion.
+     */
     void Wait(std::atomic<int>& counter);
+
+    /**
+     * Core loop for worker threads to process or steal jobs.
+     */
     void WorkerThreadLoop(uint32_t threadIndex);
 
     uint32_t GetThreadCount() const { return m_threadCount; }
 
-    //uint32_t m_idleCount = 0; // 이 스레드가 일을 못 찾은 횟수
-
 private:
-
-    uint32_t spinCount = 0;
-
     uint32_t m_threadCount;
     std::vector<std::thread> m_threads;
-    std::vector<std::unique_ptr<WorkerQueue>> m_workerQueues; // 각 스레드별 로컬 큐
+    std::vector<std::unique_ptr<WorkerQueue>> m_workerQueues; // Local queue per thread
     std::atomic<bool> m_stop;
-    std::atomic<uint32_t> m_nextQueue; // 작업을 골고루 분산하기 위한 인덱스
+    std::atomic<uint32_t> m_nextQueue; // Index for Round-robin job distribution
 
     std::mutex m_wakeMutex;
     std::condition_variable m_wakeCondition;

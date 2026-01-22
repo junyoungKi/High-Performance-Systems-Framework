@@ -1,10 +1,14 @@
 # High-Performance Systems Framework
 
+**Author: Junyoung Ki**
+
 A C++ based high-performance systems framework featuring a custom Work-Stealing Job System and a low-level DirectX 12 rendering pipeline. This project focuses on overcoming CPU-bound performance limits through efficient task scheduling and optimized hardware utilization.
 
 ## 🚀 Key Features
 
 - **Custom Work-Stealing Job System**: Implemented a thread-safe scheduler to maximize multi-core efficiency. It balances computational loads dynamically, minimizing thread idle time and synchronization overhead.
+- **Low-Latency Synchronization**: Utilized a custom **Spinlock** with `_mm_pause()` and atomic flags for high-frequency queue operations, avoiding the overhead of OS context switching.
+- **SIMD Acceleration (AVX-256)**: Optimized heavy physics calculations using Intel AVX instructions and `_mm256_stream_ps` for non-temporal memory writes, maximizing cache efficiency.
 - **DirectX 12 Backend**: Developed a robust rendering infrastructure using DX12. Key implementations include efficient Command Queue management, Resource Barriers, and Root Signature optimization.
 - **Performance-Oriented Architecture**: Designed the system to handle heavy logic updates by offloading tasks through the Job System, significantly reducing main-thread latency.
 - **Real-time Profiling & Debugging**: Integrated Dear ImGui to monitor system stability and performance metrics in real-time.
