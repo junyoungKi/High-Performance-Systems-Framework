@@ -1,6 +1,6 @@
 # High-Performance Systems Framework
 
-**Author: Junyoung Ki**
+**Author: Joonyoung Ki**
 
 A C++ based high-performance systems framework featuring a custom Work-Stealing Job System and a low-level DirectX 12 rendering pipeline. This project focuses on overcoming CPU-bound performance limits through efficient task scheduling and optimized hardware utilization.
 
