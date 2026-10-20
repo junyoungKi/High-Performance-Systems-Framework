@@ -21,7 +21,15 @@ void RenderDevice::EnableDebugLayer() {
 }
 
 ComPtr<IDXGIAdapter4> RenderDevice::GetAdapter(bool useWarp) {
-    ThrowIfFailed(CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&m_factory)));
+    // Release 빌드 시 DXGI_CREATE_FACTORY_DEBUG가 실패할 수 있으므로 안전 처리
+#if defined(_DEBUG)
+    UINT createFactoryFlags = DXGI_CREATE_FACTORY_DEBUG;
+#else
+    UINT createFactoryFlags = 0;
+#endif
+
+    ThrowIfFailed(CreateDXGIFactory2(createFactoryFlags, IID_PPV_ARGS(&m_factory)));
+
     ComPtr<IDXGIAdapter1> adapter1;
     ComPtr<IDXGIAdapter4> adapter4;
 
@@ -31,17 +39,36 @@ ComPtr<IDXGIAdapter4> RenderDevice::GetAdapter(bool useWarp) {
     }
     else {
         SIZE_T maxMem = 0;
+        ComPtr<IDXGIAdapter1> bestAdapter;
+
         for (UINT i = 0; m_factory->EnumAdapters1(i, &adapter1) != DXGI_ERROR_NOT_FOUND; ++i) {
             DXGI_ADAPTER_DESC1 desc;
             adapter1->GetDesc1(&desc);
+
+            // 소프트웨어 어댑터 제외 및 DX12 지원 여부 확인
             if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0 &&
-                SUCCEEDED(D3D12CreateDevice(adapter1.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr)) &&
-                desc.DedicatedVideoMemory > maxMem) {
-                maxMem = desc.DedicatedVideoMemory;
-                ThrowIfFailed(adapter1.As(&adapter4));
+                SUCCEEDED(D3D12CreateDevice(adapter1.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr))) {
+
+                // 시스템 공유 메모리 포함 전체 시스템 비디오 메모리로 비교하거나 첫 번째 유효 어댑터 선택
+                SIZE_T totalMem = desc.DedicatedVideoMemory + desc.SharedSystemMemory;
+                if (totalMem >= maxMem) {
+                    maxMem = totalMem;
+                    bestAdapter = adapter1; // 가장 좋은 어댑터를 임시 저장
+                }
             }
         }
+
+        // 하드웨어 어댑터를 찾았으면 adapter4로 변환
+        if (bestAdapter != nullptr) {
+            ThrowIfFailed(bestAdapter.As(&adapter4));
+        }
+        else {
+            // 외장/내장 하드웨어 어댑터를 찾지 못한 경우 WARP(소프트웨어)로 예비 전환
+            ThrowIfFailed(m_factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter1)));
+            ThrowIfFailed(adapter1.As(&adapter4));
+        }
     }
+
     return adapter4;
 }
 
