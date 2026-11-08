@@ -40,6 +40,8 @@ The core objective of this project was to resolve severe CPU bottlenecks.
 3. Ensure the latest Windows SDK is installed.
 4. Build in **Release x64** for the most accurate performance evaluation.
 
+This project was run and tested on a machine with an NVIDIA GPU.
+
 ## 📄 License
 
 This project is licensed under the MIT License.
